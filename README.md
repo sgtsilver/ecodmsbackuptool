@@ -13,6 +13,6 @@ Funktionen des Scripts:
 
 Das ganze Funktioniert dann auf Schalterbasis.
 
-Ich übernehme keine haftung wenn Ihr euch euer EcoDMS oder ein Backup mit dem Script zerschießt. Ebenso bin ich nicht der allwissende Bash Script schreiber. Vielleicht fällt euch ja noch eine verbesserung ein. Würde mich jedenfalls freuen.
+Ich übernehme keine Haftung wenn Ihr euch euer EcoDMS oder ein Backup mit dem Script zerschießt. Ebenso bin ich nicht der allwissende Bash Script schreiber. Vielleicht fällt euch ja noch eine verbesserung ein. Würde mich jedenfalls freuen.
 
 Getestet wurde das Script auf Debian-basierten Betriebssystemen auf denen **SUDO** installiert war.
