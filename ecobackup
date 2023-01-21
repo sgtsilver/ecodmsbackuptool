@@ -1,0 +1,110 @@
+#!/bin/bash
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ecodms/ecodmsserver/
+direct=$2
+############################################################
+# Hilfe                                                     #
+############################################################
+GetHelp()
+{
+   # Display Help
+   echo "EcoDMS Backup Script womit verschidenste Backups erstellt werden können. Es muss mit ROOT Rechten gestartet werden."
+   echo "Altnernativ muss die ecoDMSBackupConsole mit 710 gesetzt sein und dein user in der Gruppe ecodms"
+   echo
+   echo "Syntax: ecobackup.sh [-h|d|m|r|a|s]"
+   echo "optionen:"
+   echo "-h    Zeigt dieses Menü an"
+   echo "-d    Täglicher Backup Pfad"
+   echo "-m    Monatliches Backup Pfad"
+   echo "-r    Remote Backup Pfad"
+   echo "-c    Manuelles Backup mit eigenem Backup Pfad"
+   echo "-a    Direktes Backup mit Pfadangabe bsp.
+      ./ecobackup.sh -a /mnt/backup/"
+   echo "-s    Einmaliges setzen von 710 der ecoDMSBackupConsole und vergeben der Gruppe an den eingeloggten User
+      Bitte bedenke das bei einem EcoDMS Update die BackupConsole wieder auf auslieferung 700 gesetzt wird
+      Ebenso wird "sudo" benötigt um die Aktion durchzuführen."
+}
+############################################################
+# Einmaliges Setup                                         #
+############################################################
+setup()
+{
+   sudo /bin/chmod 710 /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole && sudo /usr/sbin/usermod -a -G ecodms $USER
+   echo Rechte gesetzt! Bitte erneut einloggen damit die Gruppenrechte greifen!
+}
+############################################################
+# Täglich                                                  #
+############################################################
+Daily()
+{
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /mnt/ecobackup/daily/
+}
+############################################################
+# Monatlich                                                #
+############################################################
+Monthly()
+{
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /mnt/ecobackup/monthly
+}
+############################################################
+# Remote                                                   #
+############################################################
+Remote()
+{
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /mnt/hetzner/ecodms
+}
+############################################################
+# Eigener Pfad                                             #
+############################################################
+Custom()
+{
+   unset $pfad
+   echo "Wohin soll das EcoDMS Backup gehen?"
+   read -p "Bitte den Ordner angeben:" -r pfad
+   if [ ! -d $pfad ]; then
+    echo "$pfad existiert nicht!"
+	exit
+   else
+    echo "Backup in $pfad wird gleich erstellt!"
+   fi
+   sleep 1
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole $pfad
+}
+############################################################
+# Advanced User Input                                      #
+############################################################
+AUI()
+{
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole $direct
+}
+############################################################
+############################################################
+
+# Schalter
+while getopts "hdmrca:s" option; do
+   case $option in
+      h)
+		 GetHelp
+         exit;;  
+	  d)
+         Daily
+         exit;;  
+	  m)
+         Monthly
+         exit;;  
+	  r)
+         Remote
+         exit;;  
+	  c)
+         Custom
+         exit;;  
+	  a)
+         AUI
+         exit;;  
+	  s)
+         setup
+         exit;;  
+
+     \?) echo "Fehler: Ungültige option. -h für Hilfe."
+         exit;;
+   esac
+done
