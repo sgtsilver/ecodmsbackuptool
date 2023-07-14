@@ -36,21 +36,21 @@ setup()
 ############################################################
 Daily()
 {
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /mnt/ecobackup/daily/
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /pfad/zum/backup/
 }
 ############################################################
 # Monatlich                                                #
 ############################################################
 Monthly()
 {
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /mnt/ecobackup/monthly
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /pfad/zum/backup/
 }
 ############################################################
 # Remote                                                   #
 ############################################################
 Remote()
 {
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /mnt/hetzner/ecodms
+   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /pfad/zum/backup/remote/
 }
 ############################################################
 # Eigener Pfad                                             #
