@@ -1,0 +1,9 @@
+# Secret notification config — must never be committed.
+notify.conf
+# Local site config can contain private mount paths.
+ecobackup.conf
+# macOS housekeeping
+.DS_Store
+# Cron snapshots are per-host and not part of the published source.
+crons/*.before
+crons/*.after

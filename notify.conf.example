@@ -1,0 +1,9 @@
+# /etc/ecobackup/notify.conf — Notification credentials. MODE 600!
+# Wird vom ecobackup-Script gesourct. NICHT in Git committen.
+
+# Discord-Webhook für Backup-Status-Meldungen.
+# Anlegen: Server-Einstellungen → Integrationen → Webhooks → Neuer Webhook
+# NOTIFY_DISCORD_WEBHOOK=https://discord.com/api/webhooks/<id>/<token>
+
+# Global enable/disable (1 = senden, 0 = stumm).
+# NOTIFY_ENABLED=1

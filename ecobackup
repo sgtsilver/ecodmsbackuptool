@@ -1,110 +1,462 @@
 #!/bin/bash
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/ecodms/ecodmsserver/
-direct=$2
+# ecobackup — Wrapper um ecoDMSBackupConsole mit Retention, Locking und
+# optionalen Notifications (derzeit Discord-Webhook).
+#
+# Designed to be publishable: keine User-Namen oder Site-spezifischen Pfade
+# fest verdrahtet — alles Override-bar via /etc/ecobackup/ecobackup.conf und
+# /etc/ecobackup/notify.conf.
+
 ############################################################
-# Hilfe                                                     #
+# CONFIG — Override via /etc/ecobackup/ecobackup.conf      #
+############################################################
+ECODMS_SERVER_DIR="${ECODMS_SERVER_DIR:-/opt/ecodms/ecodmsserver}"
+BACKUP_TOOL="${BACKUP_TOOL:-${ECODMS_SERVER_DIR}/tools/ecoDMSBackupConsole}"
+LOGFILE="${LOGFILE:-/var/log/ecobackup.log}"
+LOCKFILE="${LOCKFILE:-/tmp/ecobackup.lock}"
+
+DAILY_DIR="${DAILY_DIR:-/var/backups/ecodms/daily}"
+DAILY_KEEP_DAYS="${DAILY_KEEP_DAYS:-7}"
+MONTHLY_DIR="${MONTHLY_DIR:-/var/backups/ecodms/monthly}"
+MONTHLY_KEEP_DAYS="${MONTHLY_KEEP_DAYS:-90}"
+REMOTE_DIR="${REMOTE_DIR:-/var/backups/ecodms/remote}"
+REMOTE_KEEP_DAYS="${REMOTE_KEEP_DAYS:-14}"
+
+# User, dessen crontab vom Installer (-i) angefasst wird.
+# Default: SUDO_USER (wenn via sudo) oder aktueller User.
+CRON_USER="${CRON_USER:-${SUDO_USER:-$(whoami)}}"
+
+# Optional: Verzeichnis, in das root-cron Snapshots der Crontabs schreibt
+# (z.B. ein gemounteter Off-Site-Storage). Leer = keine Snapshots in der Cron.
+CRON_SNAPSHOT_DIR="${CRON_SNAPSHOT_DIR:-}"
+
+# Optional: Pfad für 1×/Tag Script-Mirror via root-cron (Disaster Recovery).
+# Komma-getrennte Liste von Zielverzeichnissen. Leer = kein Mirror.
+SCRIPT_MIRROR_DIRS="${SCRIPT_MIRROR_DIRS:-}"
+
+# Optional: Telekom-Mount-Path für `-a`-Cron-Slot. Leer = kein Telekom-Slot.
+TELEKOM_DIR="${TELEKOM_DIR:-}"
+TELEKOM_KEEP_DAYS="${TELEKOM_KEEP_DAYS:-90}"
+
+# Site-Overrides (DAILY_DIR, MONTHLY_DIR, REMOTE_DIR, TELEKOM_DIR,
+# CRON_SNAPSHOT_DIR, SCRIPT_MIRROR_DIRS, …)
+[ -r /etc/ecobackup/ecobackup.conf ] && . /etc/ecobackup/ecobackup.conf
+
+# Notify-Konfig (Webhook-URL, Bot-Token, …) — separates File, mode 600.
+NOTIFY_DISCORD_WEBHOOK="${NOTIFY_DISCORD_WEBHOOK:-}"
+NOTIFY_ENABLED="${NOTIFY_ENABLED:-1}"
+[ -r /etc/ecobackup/notify.conf ] && . /etc/ecobackup/notify.conf
+
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${ECODMS_SERVER_DIR}/"
+
+############################################################
+# Logging — exit-resilient (tee-Fail darf Backup nicht     #
+# kippen; Bug 2026-05-21).                                 #
+############################################################
+log()
+{
+   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE" 2>/dev/null
+   return 0
+}
+
+############################################################
+# Notify — generischer Adapter                             #
+#                                                          #
+#   notify <ok|warn|err|info> "<Titel>" "<Body>"           #
+#                                                          #
+# Async im Hintergrund, schlucken alle Fehler — Notify     #
+# darf den Backup-Pfad NIE blockieren oder fail-en.        #
+############################################################
+notify()
+{
+   [ "${NOTIFY_ENABLED:-1}" = "1" ] || return 0
+   ( _notify_discord "$@" ) </dev/null >/dev/null 2>&1 &
+   return 0
+}
+
+_notify_discord()
+{
+   [ -z "$NOTIFY_DISCORD_WEBHOOK" ] && return 0
+   command -v curl >/dev/null 2>&1 || return 0
+   command -v python3 >/dev/null 2>&1 || return 0
+   local level=$1 title=$2 body=$3 color
+   case "$level" in
+      ok)   color=3066993  ;;  # green
+      warn) color=15844367 ;;  # amber
+      err)  color=15158332 ;;  # red
+      *)    color=7506394  ;;  # blue
+   esac
+   local payload
+   payload=$(LEVEL="$level" TITLE="$title" BODY="$body" COLOR="$color" \
+             HOSTN="$(hostname)" TS="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+             python3 -c '
+import json, os
+print(json.dumps({"embeds":[{
+   "title": os.environ["TITLE"],
+   "description": os.environ["BODY"],
+   "color": int(os.environ["COLOR"]),
+   "footer": {"text": "ecobackup on " + os.environ["HOSTN"]},
+   "timestamp": os.environ["TS"],
+}]}))') || return 0
+   curl -sS -m 10 -H "Content-Type: application/json" -X POST \
+        -d "$payload" "$NOTIFY_DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+}
+
+############################################################
+# Hilfe                                                    #
 ############################################################
 GetHelp()
 {
-   # Display Help
-   echo "EcoDMS Backup Script womit verschidenste Backups erstellt werden können. Es muss mit ROOT Rechten gestartet werden."
-   echo "Altnernativ muss die ecoDMSBackupConsole mit 710 gesetzt sein und dein user in der Gruppe ecodms"
-   echo
-   echo "Syntax: ecobackup.sh [-h|d|m|r|a|s]"
-   echo "optionen:"
-   echo "-h    Zeigt dieses Menü an"
-   echo "-d    Täglicher Backup Pfad"
-   echo "-m    Monatliches Backup Pfad"
-   echo "-r    Remote Backup Pfad"
-   echo "-c    Manuelles Backup mit eigenem Backup Pfad"
-   echo "-a    Direktes Backup mit Pfadangabe bsp.
-      ./ecobackup.sh -a /mnt/backup/"
-   echo "-s    Einmaliges setzen von 710 der ecoDMSBackupConsole und vergeben der Gruppe an den eingeloggten User
-      Bitte bedenke das bei einem EcoDMS Update die BackupConsole wieder auf auslieferung 700 gesetzt wird
-      Ebenso wird "sudo" benötigt um die Aktion durchzuführen."
+   cat <<EOF
+ecobackup — Wrapper um \${BACKUP_TOOL} (ecoDMSBackupConsole).
+
+Voraussetzung: Owner ecodms:ecodms + mode 710 auf BackupConsole, eingeloggter
+User in Gruppe ecodms (siehe \`ecobackup -s\`). Wird vom täglichen root-Cron
+aufrechterhalten (siehe \`ecobackup -i print root\`).
+
+Syntax: ecobackup [-h|-d|-m|-r|-c|-a <pfad>|-s|-i|-t]
+
+Backup-Optionen:
+  -d    Tägliches Backup nach ${DAILY_DIR}     (Retention ${DAILY_KEEP_DAYS}d)
+  -m    Monatliches Backup nach ${MONTHLY_DIR} (Retention ${MONTHLY_KEEP_DAYS}d)
+  -r    Remote Backup nach ${REMOTE_DIR}       (Retention ${REMOTE_KEEP_DAYS}d)
+  -c    Interaktiv: Backup nach selbst gewähltem Pfad (ohne Auto-Prune)
+  -a P  Backup nach Pfad P                     (Retention ${ECOBACKUP_KEEP_DAYS:-90}d)
+        Override via env: ECOBACKUP_KEEP_DAYS=30 ecobackup -a /mnt/foo
+
+Setup/Wartung:
+  -s    Permissions-Setup (chown ecodms:ecodms + chmod 710 +
+        usermod -aG ecodms \$USER). Braucht sudo.
+  -i    Cron-Konfig installieren (idempotent, diff-basiert):
+          ecobackup -i                  user-crontab (+ root wenn als root)
+          sudo ecobackup -i             user- UND root-crontab
+          ecobackup -i print user       user-crontab ausgeben (dry-run)
+          ecobackup -i print root       root-crontab ausgeben (dry-run)
+  -t    Test-Notification senden (probe ob Webhook funktioniert).
+  -h    Diese Hilfe.
+
+Config:
+  /etc/ecobackup/ecobackup.conf  — Pfade, Retention-Defaults
+  /etc/ecobackup/notify.conf     — Webhook-URL (mode 600!)
+
+Log: ${LOGFILE}
+EOF
 }
+
+############################################################
+# Lock                                                     #
+############################################################
+acquire_lock()
+{
+   if [ -f "$LOCKFILE" ]; then
+      log "Backup läuft bereits (lockfile: $LOCKFILE). Abbruch."
+      notify warn "Backup übersprungen" "Lockfile vorhanden: \`$LOCKFILE\` — vermutlich läuft ein anderer Backup-Slot noch."
+      exit 1
+   fi
+   trap "rm -f \"$LOCKFILE\"" EXIT
+   touch "$LOCKFILE"
+}
+
+############################################################
+# Speicherplatz prüfen                                     #
+############################################################
+check_space()
+{
+   local dest=$1
+   local free=$(df -m "$dest" 2>/dev/null | awk 'NR==2 {print $4}')
+   if [ -n "$free" ] && [ "$free" -lt 500 ]; then
+      log "Warnung: Weniger als 500MB frei auf $dest!"
+      notify warn "Wenig Speicher auf $dest" "Nur ${free} MB frei. Backup läuft trotzdem an."
+   fi
+}
+
+############################################################
+# Retention                                                #
+############################################################
+LAST_PRUNE_SUMMARY=""
+prune()
+{
+   local dir=$1 days=$2
+   LAST_PRUNE_SUMMARY=""
+   if [ ! -d "$dir" ]; then
+      log "prune: Verzeichnis $dir existiert nicht, übersprungen"
+      LAST_PRUNE_SUMMARY="prune: skip ($dir fehlt)"
+      return 0
+   fi
+   local list
+   list=$(find "$dir" -maxdepth 1 -name "DMSbackup*.zip" -type f -mtime "+${days}" 2>/dev/null)
+   if [ -z "$list" ]; then
+      log "prune: keine Backups älter als ${days} Tage in $dir"
+      LAST_PRUNE_SUMMARY="prune: nichts zu löschen (>${days}d)"
+      return 0
+   fi
+   local count=0 freed=0 size
+   while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      size=$(stat -c%s "$f" 2>/dev/null || echo 0)
+      if rm -f -- "$f"; then
+         count=$((count + 1))
+         freed=$((freed + size))
+      fi
+   done <<< "$list"
+   local freed_h
+   freed_h=$(numfmt --to=iec --suffix=B "$freed" 2>/dev/null || echo "${freed}B")
+   log "prune: $count Backup(s) gelöscht (>${days}d in $dir, ${freed_h} frei)"
+   LAST_PRUNE_SUMMARY="prune: ${count} gelöscht (>${days}d), ${freed_h} frei"
+   return 0
+}
+
+# Backup ausführen und bei Erfolg prunen + notifyen.
+# args: <ziel-dir> <keep_days> <label>
+run_backup()
+{
+   local dest=$1 keep=$2 label=$3
+   acquire_lock
+   check_space "$dest"
+   log "${label} gestartet nach $dest"
+   local start end elapsed rc
+   start=$(date +%s)
+   "$BACKUP_TOOL" "$dest/"
+   rc=$?
+   end=$(date +%s)
+   elapsed=$((end - start))
+
+   if [ $rc -eq 0 ]; then
+      log "Backup erfolgreich! (exit 0, ${elapsed}s)"
+      local latest size_h
+      latest=$(find "$dest" -maxdepth 1 -name "DMSbackup*.zip" -type f -newermt "@${start}" 2>/dev/null | head -1)
+      if [ -n "$latest" ]; then
+         size_h=$(du -h "$latest" 2>/dev/null | awk '{print $1}')
+         log "  → $(basename "$latest") (${size_h})"
+      else
+         size_h="?"
+      fi
+      prune "$dest" "$keep"
+      notify ok "${label} ok" "Ziel: \`$dest\`
+Dauer: ${elapsed}s
+Größe: ${size_h}
+${LAST_PRUNE_SUMMARY}"
+      return 0
+   else
+      log "Backup FEHLGESCHLAGEN! (BackupConsole exit ${rc}, ${elapsed}s)"
+      notify err "${label} FAIL" "Ziel: \`$dest\`
+BackupConsole exit: ${rc}
+Dauer: ${elapsed}s
+Log: \`${LOGFILE}\`"
+      exit 1
+   fi
+}
+
 ############################################################
 # Einmaliges Setup                                         #
+#                                                          #
+# ecoDMS' dpkg-postinst setzt BackupConsole bei JEDEM      #
+# Update auf root:root mode 700. Dann kann nur root via    #
+# sudo (mit Passwort, cron-untauglich) das Tool starten.   #
+# Workaround: Owner ecodms:ecodms + mode 710 + User in     #
+# ecodms-Gruppe. Der tägliche root-Cron hält das aufrecht. #
 ############################################################
 setup()
 {
-   sudo /bin/chmod 710 /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole && sudo /usr/sbin/usermod -a -G ecodms $USER
-   echo Rechte gesetzt! Bitte erneut einloggen damit die Gruppenrechte greifen!
+   sudo /bin/chown ecodms:ecodms "$BACKUP_TOOL" \
+      && sudo /bin/chmod 710 "$BACKUP_TOOL" \
+      && sudo /usr/sbin/usermod -a -G ecodms "$USER"
+   echo "Rechte gesetzt! Bitte erneut einloggen damit die Gruppenrechte greifen!"
 }
+
 ############################################################
-# Täglich                                                  #
+# Backup-Funktionen                                        #
 ############################################################
-Daily()
-{
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /pfad/zum/backup/
-}
-############################################################
-# Monatlich                                                #
-############################################################
-Monthly()
-{
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /pfad/zum/backup/
-}
-############################################################
-# Remote                                                   #
-############################################################
-Remote()
-{
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole /pfad/zum/backup/remote/
-}
-############################################################
-# Eigener Pfad                                             #
-############################################################
+Daily()   { run_backup "$DAILY_DIR"   "${ECOBACKUP_KEEP_DAYS:-$DAILY_KEEP_DAYS}"   "Tägliches Backup"; }
+Monthly() { run_backup "$MONTHLY_DIR" "${ECOBACKUP_KEEP_DAYS:-$MONTHLY_KEEP_DAYS}" "Monatliches Backup"; }
+Remote()  { run_backup "$REMOTE_DIR"  "${ECOBACKUP_KEEP_DAYS:-$REMOTE_KEEP_DAYS}"  "Remote Backup"; }
+
 Custom()
 {
-   unset $pfad
+   unset pfad
    echo "Wohin soll das EcoDMS Backup gehen?"
-   read -p "Bitte den Ordner angeben:" -r pfad
-   if [ ! -d $pfad ]; then
-    echo "$pfad existiert nicht!"
-	exit
-   else
-    echo "Backup in $pfad wird gleich erstellt!"
+   read -p "Bitte den Ordner angeben: " -r pfad
+   if [ ! -d "$pfad" ]; then
+      echo "$pfad existiert nicht!"
+      exit 1
    fi
-   sleep 1
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole $pfad
+   acquire_lock
+   check_space "$pfad"
+   log "Manuelles Backup gestartet nach $pfad"
+   "$BACKUP_TOOL" "$pfad/"
+   local rc=$?
+   if [ $rc -eq 0 ]; then
+      log "Backup erfolgreich! (exit 0)"
+   else
+      log "Backup FEHLGESCHLAGEN! (BackupConsole exit ${rc})"
+      exit 1
+   fi
 }
-############################################################
-# Advanced User Input                                      #
-############################################################
+
 AUI()
 {
-   /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole $direct
+   if [ ! -d "$direct" ]; then
+      log "Fehler: Verzeichnis $direct existiert nicht!"
+      exit 1
+   fi
+   run_backup "$direct" "${ECOBACKUP_KEEP_DAYS:-90}" "Backup ($direct)"
 }
-############################################################
-############################################################
 
-# Schalter
-while getopts "hdmrca:s" option; do
+############################################################
+# Test-Notification                                        #
+############################################################
+test_notify()
+{
+   if [ -z "$NOTIFY_DISCORD_WEBHOOK" ]; then
+      echo "Kein NOTIFY_DISCORD_WEBHOOK konfiguriert."
+      echo "→ Trage die Webhook-URL in /etc/ecobackup/notify.conf ein:"
+      echo "    NOTIFY_DISCORD_WEBHOOK=https://discord.com/api/webhooks/..."
+      exit 1
+   fi
+   echo "Sende Test-Notification…"
+   notify info "ecobackup Test" "Test-Nachricht von \`$(hostname)\` um $(date '+%Y-%m-%d %H:%M:%S').
+Wenn diese Nachricht im Channel ankommt, ist der Webhook korrekt konfiguriert."
+   wait
+   echo "Gesendet (siehe Discord-Channel)."
+}
+
+############################################################
+# Embedded Crontabs — Single Source of Truth               #
+############################################################
+_cron_user()
+{
+   cat <<EOF
+# user-crontab für '${CRON_USER}' — installed via \`ecobackup -i\`
+# Single source of truth: $(realpath "$0" 2>/dev/null || echo "ecobackup") (_cron_user function)
+# Retention ist SCRIPT-INTERN. KEINE \`&& find -delete\`-Chain — die war
+# Verstärker des 2026-05-21-Bugs (Logging-Fail kippte exit, find lief nie).
+
+# === ecoDMS Backups ===
+35 1 * * *   /usr/bin/ecobackup -d
+55 1 * * *   /usr/bin/ecobackup -r
+45 1 1 * *   /usr/bin/ecobackup -m
+EOF
+   # Telekom-Slot nur wenn konfiguriert
+   if [ -n "$TELEKOM_DIR" ]; then
+      printf '35 2 1 * *   ECOBACKUP_KEEP_DAYS=%s /usr/bin/ecobackup -a %q\n' \
+         "$TELEKOM_KEEP_DAYS" "$TELEKOM_DIR"
+   fi
+   # Crontab-Snapshot nur wenn konfiguriert
+   if [ -n "$CRON_SNAPSHOT_DIR" ]; then
+      cat <<EOF
+
+# === Crontab-Snapshot (1×/Tag) ===
+5 3 * * *    /usr/bin/crontab -l > ${CRON_SNAPSHOT_DIR}/usercrons.txt
+EOF
+   fi
+}
+
+_cron_root()
+{
+   cat <<EOF
+# root crontab — installed via \`sudo ecobackup -i\`
+# Single source of truth: $(realpath "$0" 2>/dev/null || echo "ecobackup") (_cron_root function)
+MAILTO=""
+
+# === ecoDMS scaninput pipe ===
+*/2 * * * * /bin/mv /var/spool/cups-pdf/ANONYMOUS/* ${ECODMS_SERVER_DIR%/ecodmsserver}/workdir/scaninput/
+
+# Daily cups restart (legacy workaround for stuck print queue).
+0 5 * * * service cups restart
+
+# === BackupConsole-Permissions täglich rückversichern ===
+# ecoDMS dpkg-postinst setzt bei jedem Update Owner=root:root mode=700 zurück.
+# Wir halten Owner=ecodms:ecodms mode=710, damit User via ecodms-Gruppe
+# cron-fähig bleibt. Siehe \`ecobackup -s\` für Hintergrund.
+10 3 * * * /bin/chown ecodms:ecodms ${BACKUP_TOOL} && /bin/chmod 710 ${BACKUP_TOOL}
+EOF
+   if [ -n "$CRON_SNAPSHOT_DIR" ]; then
+      cat <<EOF
+
+# === Crontab-Snapshot (1×/Tag) ===
+5 3 * * *  /usr/bin/crontab -l > ${CRON_SNAPSHOT_DIR}/rootcrons.txt
+EOF
+   fi
+   if [ -n "$SCRIPT_MIRROR_DIRS" ]; then
+      cat <<'EOF'
+
+# === ecobackup-Script-Mirror (1×/Tag, Disaster Recovery) ===
+EOF
+      local IFS=,
+      for d in $SCRIPT_MIRROR_DIRS; do
+         printf '0 3 * * *  /bin/cp /usr/bin/ecobackup %s\n' "$d"
+      done
+   fi
+}
+
+############################################################
+# Cron-Installer (idempotent, diff-basiert)                #
+############################################################
+install_crons()
+{
+   local mode="${1:-apply}" target="${2:-}"
+
+   if [ "$mode" = "print" ]; then
+      case "$target" in
+         user|"$CRON_USER") _cron_user; return 0;;
+         root) _cron_root; return 0;;
+         *) echo "Usage: ecobackup -i print {user|root}" >&2; return 1;;
+      esac
+   fi
+
+   _install_one_cron "$CRON_USER" "$(_cron_user)" || return $?
+   if [ "$(id -u)" -eq 0 ]; then
+      _install_one_cron root "$(_cron_root)" || return $?
+   else
+      echo ">>> root-crontab nicht installiert. Für root-Cron neu starten als:"
+      echo "    sudo ecobackup -i"
+   fi
+}
+
+_install_one_cron()
+{
+   local who=$1 desired=$2 current diff_out
+   if [ "$(id -u)" -eq 0 ]; then
+      current=$(crontab -u "$who" -l 2>/dev/null || true)
+   else
+      if [ "$who" != "$(whoami)" ]; then
+         echo "  skip: ${who}-crontab nur als ${who} oder root installierbar."
+         return 0
+      fi
+      current=$(crontab -l 2>/dev/null || true)
+   fi
+   diff_out=$(diff <(echo "$current") <(echo "$desired") || true)
+   if [ -z "$diff_out" ]; then
+      echo "  ${who}-crontab: bereits aktuell, nichts zu tun."
+      return 0
+   fi
+   echo "  ${who}-crontab: Änderung erkannt, installiere…"
+   if [ "$(id -u)" -eq 0 ]; then
+      echo "$desired" | crontab -u "$who" -
+   else
+      echo "$desired" | crontab -
+   fi
+   log "install-crons: ${who}-crontab installiert ($(wc -l <<<"$desired") Zeilen)"
+   echo "  ok."
+}
+
+############################################################
+# Entry                                                    #
+############################################################
+while getopts "hdmrca:sit" option; do
    case $option in
-      h)
-		 GetHelp
-         exit;;  
-	  d)
-         Daily
-         exit;;  
-	  m)
-         Monthly
-         exit;;  
-	  r)
-         Remote
-         exit;;  
-	  c)
-         Custom
-         exit;;  
-	  a)
-         AUI
-         exit;;  
-	  s)
-         setup
-         exit;;  
-
-     \?) echo "Fehler: Ungültige option. -h für Hilfe."
-         exit;;
+      h) GetHelp; exit;;
+      d) Daily; exit;;
+      m) Monthly; exit;;
+      r) Remote; exit;;
+      c) Custom; exit;;
+      a) direct="$OPTARG"; AUI; exit;;
+      s) setup; exit;;
+      i) shift $((OPTIND - 1)); install_crons "$@"; exit;;
+      t) test_notify; exit;;
+      \?) echo "Fehler: Ungültige option. -h für Hilfe."; exit 1;;
    esac
 done
+
+if [ $OPTIND -eq 1 ]; then
+   GetHelp
+fi

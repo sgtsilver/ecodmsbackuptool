@@ -1,0 +1,34 @@
+# /etc/ecobackup/ecobackup.conf — Site-spezifische Konfiguration
+# Wird vom ecobackup-Script gesourct. Mode 644, Owner root, ok.
+#
+# Alle Werte sind optional — wenn nicht gesetzt, gelten die Defaults aus dem
+# Script (siehe Top-of-Script CONFIG-Block).
+
+# === ecoDMS Server-Verzeichnis ===
+# ECODMS_SERVER_DIR=/opt/ecodms/ecodmsserver
+# BACKUP_TOOL="$ECODMS_SERVER_DIR/tools/ecoDMSBackupConsole"
+
+# === Backup-Ziele ===
+DAILY_DIR=/mnt/backup/ecodms/daily
+DAILY_KEEP_DAYS=7
+
+MONTHLY_DIR=/mnt/backup/ecodms/monthly
+MONTHLY_KEEP_DAYS=90
+
+REMOTE_DIR=/mnt/remote/ecodms
+REMOTE_KEEP_DAYS=14
+
+# Optional: Telekom-/Zweit-Cloud-Slot (für `-a`-Cron).
+# TELEKOM_DIR="/mnt/cloud/EcoDMS Backup/monthly"
+# TELEKOM_KEEP_DAYS=90
+
+# === Cron-Installer (-i) ===
+# User dessen Crontab installiert wird. Default: $SUDO_USER bzw. $USER.
+# CRON_USER=paul
+
+# Optional: Crontab-Snapshots nach Off-Site Pfad sichern (1×/Tag).
+# CRON_SNAPSHOT_DIR=/mnt/remote/ecodms/crons
+
+# Optional: Script alle 24h nach diesen Verzeichnissen mirroren (Disaster
+# Recovery). Komma-getrennte Liste.
+# SCRIPT_MIRROR_DIRS=/mnt/remote/ecodms/ecobackuptool,/home/USER/git/ecodmsbackuptool
