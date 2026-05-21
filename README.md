@@ -2,22 +2,23 @@
 
 # 📦 ecobackup
 
-**A robust, log-aware Bash wrapper around `ecoDMSBackupConsole`**
-*Battle-tested retention · embedded crontabs · Discord notifications · zero external dependencies*
+**Ein robuster Bash-Wrapper rund um `ecoDMSBackupConsole`**
+*Script-interne Retention · eingebettete Crontabs · Discord-Benachrichtigungen · keine externen Abhängigkeiten*
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/Lizenz-GPLv3-blue.svg)](LICENSE)
 [![Shell](https://img.shields.io/badge/shell-bash%205%2B-1f425f.svg)](https://www.gnu.org/software/bash/)
 [![ecoDMS](https://img.shields.io/badge/ecoDMS-22%20%7C%2024%20%7C%2026-blue.svg)](https://www.ecodms.de/)
 [![Debian](https://img.shields.io/badge/Debian-11%20%7C%2012%20%7C%2013-a81d33.svg)](https://www.debian.org/)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
+[![PRs willkommen](https://img.shields.io/badge/PRs-willkommen-brightgreen.svg)](#-mitmachen)
+[![Made with Claude Code](https://img.shields.io/badge/Pair%20Programming-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
 
 </div>
 
 ---
 
-`ecoDMSBackupConsole` ships with ecoDMS but does **only one thing**: dump a zip into a directory. No rotation. No verification. No notifications. No exit-code contract.
+`ecoDMSBackupConsole` wird mit ecoDMS ausgeliefert und macht genau **eine** Sache: ein Zip in ein Verzeichnis schreiben. Keine Rotation. Keine Verifikation. Keine Benachrichtigungen. Kein dokumentierter Exit-Code-Vertrag.
 
-This wrapper fills the gap with a single `bash` script (~450 lines, no deps beyond `curl` and `python3` for JSON encoding) you can deploy in under a minute.
+Dieser Wrapper schließt die Lücke — ein einzelnes `bash`-Skript (~450 Zeilen, keine Abhängigkeiten außer `curl` und `python3` fürs JSON-Encoding), das in unter einer Minute deploybar ist.
 
 ```
    ┌─────────┐    ┌──────────────────────┐    ┌───────────────┐
@@ -34,19 +35,20 @@ This wrapper fills the gap with a single `bash` script (~450 lines, no deps beyo
 
 ---
 
-## Table of Contents
+## Inhaltsverzeichnis
 
 - [Features](#-features)
 - [Quick Start](#-quick-start)
-- [Configuration](#-configuration)
-- [Usage](#-usage)
-- [Notifications](#-notifications)
-- [Cron Layout](#-cron-layout)
-- [Architecture Notes](#-architecture-notes)
-- [Production Story: A Six-Week Silent Failure](#-production-story-a-six-week-silent-failure)
+- [Konfiguration](#%EF%B8%8F-konfiguration)
+- [Verwendung](#-verwendung)
+- [Benachrichtigungen](#-benachrichtigungen)
+- [Cron-Layout](#-cron-layout)
+- [Architektur-Notizen](#-architektur-notizen)
+- [Aus der Praxis: Ein sechs Wochen langes stilles Versagen](#-aus-der-praxis-ein-sechs-wochen-langes-stilles-versagen)
 - [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
+- [Mitmachen](#-mitmachen)
+- [Credits](#-credits)
+- [Lizenz](#-lizenz)
 
 ---
 
@@ -54,52 +56,52 @@ This wrapper fills the gap with a single `bash` script (~450 lines, no deps beyo
 
 | | |
 |---|---|
-| 🔒 **Atomic locking** | per-host lockfile prevents overlapping runs |
-| 🗑️ **Script-internal retention** | `find -mtime +N -delete`, decoupled from cron exit codes (no more "cleanup never ran because logging failed") |
-| 📣 **Pluggable notifications** | Discord webhook out of the box; adapter-friendly for ntfy/Slack/etc. |
-| ⚙️ **Embedded crontabs** | `ecobackup -i` installs cron entries idempotently, no separate cron files to maintain |
-| 🧪 **Smoke-test friendly** | `ecobackup -t` validates notify, `ecobackup -i print user` is a dry-run |
-| 🛠 **Permission self-healing** | works around ecoDMS' `dpkg postinst` resetting `BackupConsole` to `root:root 700` after every update |
-| 📦 **Zero dependencies** | `bash`, `curl`, `python3` (Debian default install) |
-| 🌐 **Site-agnostic** | all paths via `/etc/ecobackup/ecobackup.conf` — fork and ship without renaming |
+| 🔒 **Atomares Locking** | Lockfile pro Host verhindert überlappende Läufe |
+| 🗑️ **Script-interne Retention** | `find -mtime +N -delete`, entkoppelt vom Cron-Exit-Code (nie wieder "Cleanup lief nicht, weil das Logging fehlschlug") |
+| 📣 **Pluggable Notifications** | Discord-Webhook out of the box, der Adapter ist auf ntfy/Slack/etc. erweiterbar |
+| ⚙️ **Eingebettete Crontabs** | `ecobackup -i` installiert die Cron-Einträge idempotent — keine separaten Cron-Files zu pflegen |
+| 🧪 **Smoke-Test-freundlich** | `ecobackup -t` testet das Notify, `ecobackup -i print user` ist ein Dry-Run |
+| 🛠 **Self-Healing Permissions** | umgeht den ecoDMS-`dpkg postinst`, der `BackupConsole` nach jedem Update auf `root:root 700` zurücksetzt |
+| 📦 **Null Abhängigkeiten** | `bash`, `curl`, `python3` (Debian-Standard-Installation) |
+| 🌐 **Site-agnostisch** | alle Pfade in `/etc/ecobackup/ecobackup.conf` — forken und einsetzen ohne Umbenennen |
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-# 1. Get the script onto your ecoDMS host
+# 1. Skript auf den ecoDMS-Host bringen
 sudo install -m 755 -o root -g root ecobackup /usr/bin/ecobackup
 
-# 2. Configure paths (see ecobackup.conf.example)
+# 2. Pfade konfigurieren (siehe ecobackup.conf.example)
 sudo install -d /etc/ecobackup
 sudo cp ecobackup.conf.example /etc/ecobackup/ecobackup.conf
 sudo $EDITOR /etc/ecobackup/ecobackup.conf
 
-# 3. (Optional) configure Discord webhook
+# 3. (Optional) Discord-Webhook einrichten
 sudo cp notify.conf.example /etc/ecobackup/notify.conf
 sudo chmod 600 /etc/ecobackup/notify.conf
 sudo $EDITOR /etc/ecobackup/notify.conf
 
-# 4. One-time permissions setup (chown + chmod + add user to ecodms group)
+# 4. Einmaliges Permissions-Setup (chown + chmod + User in ecodms-Gruppe)
 ecobackup -s
-# log out + back in so group membership takes effect
+# einmal aus- und wieder einloggen, damit die Gruppenmitgliedschaft greift
 
-# 5. Install cron entries (idempotent — safe to re-run)
+# 5. Cron-Einträge installieren (idempotent — beliebig oft ausführbar)
 sudo ecobackup -i
 
-# 6. Smoke-test
-ecobackup -t                 # sends a Discord test message
-ecobackup -d                 # runs a full daily backup
+# 6. Smoke-Test
+ecobackup -t                 # schickt Discord-Test-Nachricht
+ecobackup -d                 # läuft das volle Daily-Backup
 ```
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Konfiguration
 
-Two files, both optional. The script ships with safe defaults; configs override.
+Zwei Dateien, beide optional. Das Skript bringt sinnvolle Defaults mit; Configs überschreiben diese.
 
-### `/etc/ecobackup/ecobackup.conf` (paths, retention)
+### `/etc/ecobackup/ecobackup.conf` (Pfade, Retention)
 
 ```bash
 DAILY_DIR=/mnt/backup/ecodms/daily
@@ -111,19 +113,19 @@ MONTHLY_KEEP_DAYS=90
 REMOTE_DIR=/mnt/remote/ecodms
 REMOTE_KEEP_DAYS=14
 
-# Optional second cloud target driven via `-a` cron slot
+# Optional: zweites Cloud-Ziel über den `-a`-Cron-Slot
 TELEKOM_DIR="/mnt/cloud/EcoDMS Backup/monthly"
 TELEKOM_KEEP_DAYS=90
 
-# Cron installer
-CRON_USER=youruser
+# Cron-Installer
+CRON_USER=deinuser
 CRON_SNAPSHOT_DIR=/mnt/remote/ecodms/crons
 SCRIPT_MIRROR_DIRS=/mnt/remote/ecodms/ecobackuptool/ecobackup
 ```
 
-See [`ecobackup.conf.example`](ecobackup.conf.example) for the full reference.
+Vollständige Referenz: [`ecobackup.conf.example`](ecobackup.conf.example).
 
-### `/etc/ecobackup/notify.conf` (webhook secrets) — **mode 600!**
+### `/etc/ecobackup/notify.conf` (Webhook-Secrets) — **Mode 600!**
 
 ```bash
 NOTIFY_DISCORD_WEBHOOK=https://discord.com/api/webhooks/<id>/<token>
@@ -132,27 +134,27 @@ NOTIFY_ENABLED=1
 
 ---
 
-## 🧰 Usage
+## 🧰 Verwendung
 
-| Command | Effect |
+| Befehl | Wirkung |
 |---|---|
-| `ecobackup -d` | Daily backup (retention `DAILY_KEEP_DAYS`) |
-| `ecobackup -m` | Monthly backup |
-| `ecobackup -r` | Remote backup |
-| `ecobackup -a <path>` | Backup to arbitrary path (`ECOBACKUP_KEEP_DAYS=N` to override retention) |
-| `ecobackup -c` | Interactive: prompt for path, no auto-prune |
-| `ecobackup -s` | One-time permission fix (BackupConsole + group membership) |
-| `ecobackup -i` | Install user crontab (and root crontab if run via `sudo`) |
-| `ecobackup -i print user` | Dry-run: print the would-be user crontab |
-| `ecobackup -i print root` | Dry-run: print the would-be root crontab |
-| `ecobackup -t` | Send a test notification |
-| `ecobackup -h` | Help with current resolved config |
+| `ecobackup -d` | Tägliches Backup (Retention `DAILY_KEEP_DAYS`) |
+| `ecobackup -m` | Monatliches Backup |
+| `ecobackup -r` | Remote Backup |
+| `ecobackup -a <pfad>` | Backup nach beliebigem Pfad (`ECOBACKUP_KEEP_DAYS=N` für Retention-Override) |
+| `ecobackup -c` | Interaktiv: nach Pfad fragen, keine Auto-Retention |
+| `ecobackup -s` | Einmaliger Permission-Fix (BackupConsole + Gruppenmitgliedschaft) |
+| `ecobackup -i` | User-Crontab installieren (+ root-Crontab wenn via `sudo`) |
+| `ecobackup -i print user` | Dry-Run: zeigt die User-Crontab, die installiert würde |
+| `ecobackup -i print root` | Dry-Run: zeigt die root-Crontab, die installiert würde |
+| `ecobackup -t` | Test-Notification senden |
+| `ecobackup -h` | Hilfe mit aktuell aufgelöster Konfiguration |
 
 ---
 
-## 📣 Notifications
+## 📣 Benachrichtigungen
 
-Every backup run produces a Discord embed:
+Jeder Backup-Lauf produziert ein Discord-Embed:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -163,24 +165,24 @@ Every backup run produces a Discord embed:
 │ Größe: 5.4G                                              │
 │ prune: 1 gelöscht (>7d), 5.3GiB frei                     │
 │                                                          │
-│ ecobackup on ecodms · 2026-05-21 01:35:34 UTC            │
+│ ecobackup on ecodms · 21.05.2026 01:35:34 UTC            │
 └──────────────────────────────────────────────────────────┘
 ```
 
-Color-coded by level:
-- 🟢 `ok` — backup succeeded, retention applied
-- 🟡 `warn` — low disk, lock contention, etc.
-- 🔴 `err` — backup failed (includes exit code + log path)
+Nach Level farbcodiert:
+- 🟢 `ok` — Backup hat geklappt, Retention angewendet
+- 🟡 `warn` — wenig Speicher, Lock-Kollision, etc.
+- 🔴 `err` — Backup fehlgeschlagen (mit Exit-Code + Log-Pfad)
 
-The Discord transport is a small adapter. Swapping in ntfy/Slack/Telegram is ~20 lines — see `_notify_discord()` in the script.
+Der Discord-Transport ist ein kleiner Adapter. Ein Tausch gegen ntfy/Slack/Telegram sind ~20 Zeilen — siehe `_notify_discord()` im Script.
 
 ---
 
-## ⏰ Cron Layout
+## ⏰ Cron-Layout
 
-ecobackup ships its own crontabs and installs them via `ecobackup -i`. Re-running is idempotent (diff-based — only writes when content actually differs).
+ecobackup bringt seine Crontabs selbst mit und installiert sie via `ecobackup -i`. Erneutes Ausführen ist idempotent (diff-basiert — schreibt nur, wenn sich Inhalt wirklich unterscheidet).
 
-**User crontab** (`crontab -l` after `ecobackup -i`):
+**User-Crontab** (`crontab -l` nach `ecobackup -i`):
 
 ```cron
 35 1 * * *   /usr/bin/ecobackup -d
@@ -190,7 +192,7 @@ ecobackup ships its own crontabs and installs them via `ecobackup -i`. Re-runnin
 5  3 * * *   /usr/bin/crontab -l > /mnt/remote/ecodms/crons/usercrons.txt
 ```
 
-**Root crontab** (after `sudo ecobackup -i`):
+**Root-Crontab** (nach `sudo ecobackup -i`):
 
 ```cron
 */2 * * * *  /bin/mv /var/spool/cups-pdf/ANONYMOUS/* /opt/ecodms/workdir/scaninput/
@@ -200,52 +202,52 @@ ecobackup ships its own crontabs and installs them via `ecobackup -i`. Re-runnin
 0  3 * * *   cp /usr/bin/ecobackup /mnt/remote/ecodms/ecobackuptool/ecobackup
 ```
 
-> **Retention is NOT chained in cron.** It runs *inside* the script, only when the backup actually succeeds (`exit 0`). See ["Production Story"](#-production-story-a-six-week-silent-failure) below for why this matters.
+> **Retention hängt NICHT mehr an einer Cron-Chain.** Sie läuft *innerhalb* des Scripts und nur dann, wenn das Backup wirklich `exit 0` liefert. Warum das wichtig ist, steht weiter unten unter ["Aus der Praxis"](#-aus-der-praxis-ein-sechs-wochen-langes-stilles-versagen).
 
 ---
 
-## 🏗 Architecture Notes
+## 🏗 Architektur-Notizen
 
-### The `ecoDMSBackupConsole` permission dance
+### Der Permissions-Tanz mit `ecoDMSBackupConsole`
 
-ecoDMS' `dpkg postinst` resets `/opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole` to `root:root 700` on *every* package update, and installs a sudoers rule that requires an interactive password (`ALL ALL = PASSWD:.../ecoDMSBackupConsole`). Neither setup is cron-friendly.
+Der ecoDMS-`dpkg postinst` setzt `/opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole` bei *jedem* Paket-Update auf `root:root 700` zurück und legt eine sudoers-Regel mit Passwort-Pflicht an (`ALL ALL = PASSWD:.../ecoDMSBackupConsole`). Beides ist cron-untauglich.
 
-ecobackup's workaround:
+ecobackups Workaround:
 
-1. `ecobackup -s` once → `chown ecodms:ecodms` + `chmod 710` + `usermod -aG ecodms $USER`
-2. Daily root-cron re-applies the chown/chmod so the next ecoDMS update doesn't break automation
-3. Backup runs as your user (member of `ecodms` group), no sudo password needed
+1. Einmal `ecobackup -s` → `chown ecodms:ecodms` + `chmod 710` + `usermod -aG ecodms $USER`
+2. Täglicher root-Cron wendet chown/chmod erneut an, damit das nächste ecoDMS-Update die Automation nicht killt
+3. Backups laufen als dein User (Mitglied der `ecodms`-Gruppe) — kein sudo-Passwort nötig
 
-### Lock model
+### Lock-Modell
 
-Single global lockfile `/tmp/ecobackup.lock`, trap-cleaned on EXIT. Acquired before the BackupConsole call; warned-on-skip raises a Discord `warn` if two slots collide. Per-target locks + stale-lock recovery are on the roadmap.
+Ein globales Lockfile `/tmp/ecobackup.lock`, beim EXIT trap-gecleant. Wird vor dem BackupConsole-Aufruf geholt; eine Skip-Warnung löst einen Discord-`warn` aus, wenn zwei Slots kollidieren. Lockfile pro Ziel + Stale-Lock-Recovery stehen auf der Roadmap.
 
-### Exit code contract (verified empirically on ecoDMS 26.01)
+### Exit-Code-Vertrag (empirisch verifiziert auf ecoDMS 26.01)
 
-| BackupConsole exit | Meaning |
+| BackupConsole exit | Bedeutung |
 |---|---|
-| `0` | Success |
-| `2` | Failure (invalid path, missing arg, no write permission) |
+| `0` | Erfolg |
+| `2` | Fehler (ungültiger Pfad, fehlendes Argument, kein Schreibrecht) |
 
-Older community sources (e.g. Andy's Blog) report "no errorlevel" — that's outdated for 26.01. ecobackup relies on the exit code; if you're on an older ecoDMS, please test before trusting it.
+Ältere Community-Quellen (etwa Andy's Blog) sagen "kein errorlevel" — das ist für 26.01 **veraltet**. ecobackup verlässt sich auf den Exit-Code; bei älteren ecoDMS-Versionen bitte vorher testen.
 
 ---
 
-## 📖 Production Story: A Six-Week Silent Failure
+## 📖 Aus der Praxis: Ein sechs Wochen langes stilles Versagen
 
-This wrapper started life as a 100-line script that worked fine for years — until it didn't.
+Dieser Wrapper fing als 100-Zeilen-Skript an und lief jahrelang sauber — bis er es nicht mehr tat.
 
-In April 2026, the daily backup directory started growing without bound. We had **41 zips in `daily/`** when the limit was supposed to be 7. The log file showed only two entries from the last six weeks. Both were from manual `sudo` runs.
+Im April 2026 begann das Daily-Backup-Verzeichnis ungebremst zu wachsen. Wir hatten **41 Zips in `daily/`**, obwohl das Limit eigentlich 7 war. Das Logfile zeigte nur zwei Einträge aus den letzten sechs Wochen. Beide aus manuellen `sudo`-Läufen.
 
-### Root cause
+### Root Cause
 
 ```bash
 log() { echo "[$(date)] $*" | tee -a "$LOGFILE"; }
 ```
 
-`tee -a` returns non-zero when it can't write. The log file was `root:root 644`; cron ran the script as a non-root user. So every `log()` call from cron silently exited with 1.
+`tee -a` liefert non-zero zurück, wenn es nicht schreiben kann. Das Logfile war `root:root 644`; Cron lief das Script als nicht-root-User. Also lieferte jeder `log()`-Aufruf aus dem Cron-Lauf still exit 1 zurück.
 
-That non-zero exit then cascaded through the canonical idiom:
+Dieser non-zero Exit kaskadierte dann durch das klassische Idiom:
 
 ```bash
 BackupConsole "$dest/" \
@@ -253,68 +255,92 @@ BackupConsole "$dest/" \
    || { log "Backup FAILED"; exit 1; }
 ```
 
-Backup succeeded → `log` failed → `||` branch fired → script exited 1 → both the script-internal prune *and* the cron-chained `&& find -mtime +N -delete` were skipped. For six weeks.
+Backup gelang → `log` fiel um → `||`-Zweig zündete → Script exit 1 → sowohl das script-interne Prune *als auch* der cron-chained `&& find -mtime +N -delete` wurden übersprungen. Sechs Wochen lang.
 
-### Fixes applied in v1.x
+### Was in v1.x gefixt wurde
 
 | Version | Fix |
 |---|---|
-| **Hotfix** | `tee -a "$LOGFILE" 2>/dev/null; return 0` — `log()` can never affect exit chains. Logfile chowned to the cron user. |
-| **v1.1** | Retention moved *into* the script; `&&`-chains removed from cron. Bug class structurally eliminated. |
-| **v1.2** | Config-driven paths, embedded crontabs, Discord notify, generic-user refactor for public release. |
+| **Hotfix** | `tee -a "$LOGFILE" 2>/dev/null; return 0` — `log()` kann den Exit-Status nicht mehr kippen. Logfile chown auf den Cron-User. |
+| **v1.1** | Retention in das Script gezogen; `&&`-Chains aus dem Cron raus. Bug-Klasse strukturell weg. |
+| **v1.2** | Pfade konfig-driven, eingebettete Crontabs, Discord-Notify, generisches User-Refactoring fürs Public Release. |
 
-### Lesson
+### Lehre
 
-> **A logging call must never be able to change a script's exit status.** The "fail loud" school is correct in spirit, but if your "fail loud" mechanism is the same channel as the thing that failed (a logging side-effect), you fail *silent* instead.
+> **Ein Logging-Aufruf darf niemals den Exit-Status eines Skripts ändern können.** Die "fail loud"-Schule hat im Geist recht — aber wenn dein "fail loud"-Mechanismus über denselben Kanal läuft wie das Ding, das versagt hat (ein Side-Effect beim Logging), dann fällst du stattdessen *still* um.
 
 ---
 
 ## 🗺 Roadmap
 
-- [ ] **Integrity verification** — `unzip -tq` + SQL header check before prune
-- [ ] **`age`-encrypted off-site backups** — defense against Hetzner/cloud provider access
-- [ ] **Per-target lockfiles** with stale-PID recovery
-- [ ] **Atomic write** — `<target>/.partial/` → `mv` after integrity check
-- [ ] **Pre-flight checks** — mount alive, ecoDMS service running, source has 2× target free
-- [ ] **Automated restore drill** — monthly test-restore into throwaway PostgreSQL database
-- [ ] **Notify adapters** — ntfy.sh, Slack, Telegram, email via msmtp
-- [ ] **Optional `pg_dump -Fc`-only fast backup slot** — for RPO < 6h between full backups
-- [ ] **systemd timers** as alternative to cron
+- [ ] **Integritäts-Verifikation** — `unzip -tq` + SQL-Header-Check vor Prune
+- [ ] **`age`-verschlüsselte Off-Site-Backups** — Schutz vor Hetzner-/Cloud-Provider-Zugriff
+- [ ] **Pro-Ziel-Lockfiles** mit Stale-PID-Recovery
+- [ ] **Atomic Write** — `<target>/.partial/` → `mv` nach Integritätsprüfung
+- [ ] **Pre-Flight-Checks** — Mount live, ecoDMS-Service läuft, Source hat 2× Ziel frei
+- [ ] **Automatisierter Restore-Drill** — monatlicher Test-Restore in eine Wegwerf-PostgreSQL-DB
+- [ ] **Notify-Adapter** — ntfy.sh, Slack, Telegram, E-Mail via msmtp
+- [ ] **Optionaler `pg_dump -Fc`-Schnellbackup-Slot** — für RPO < 6h zwischen den Vollbackups
+- [ ] **systemd-Timer** als Alternative zu Cron
 
-PRs welcome on any of these.
-
----
-
-## 🤝 Contributing
-
-This started as a single-host script and grew. The architecture is intentionally simple — bash + standard tools — and should stay that way.
-
-**Good PRs:**
-- Compatibility fixes for older ecoDMS versions (especially exit-code behavior pre-26)
-- New notify adapters (one short function, see `_notify_discord`)
-- Pre-flight checks, integrity verification
-- Documentation, examples, install scripts for other distros
-
-**Probably-not PRs:**
-- Rewrites to Go/Python/Rust — the value is in being a 1-file drop-in
-- Web UI, dashboard, REST API
-- Anything that requires changing the call surface of `ecoDMSBackupConsole`
-
-Run `bash -n ecobackup` before submitting. There's no test suite (yet); manual smoke-tests via `ecobackup -t` and `ecobackup -i print user/root` should pass.
+PRs zu allen Punkten willkommen.
 
 ---
 
-## 📄 License
+## 🤝 Mitmachen
 
-[GNU GPL v3](LICENSE). See LICENSE for full text. Forks and derivative works must remain under GPLv3.
+Dieses Tool fing als Single-Host-Skript an und ist gewachsen. Die Architektur ist bewusst simpel — bash plus Standard-Tools — und soll auch so bleiben.
 
-ecoDMS and ecoDMSBackupConsole are trademarks/products of [ecoDMS GmbH](https://www.ecodms.de/), Aachen, Germany. This project is an independent open-source wrapper and is not affiliated with, endorsed by, or supported by ecoDMS GmbH.
+**Gute PRs:**
+- Kompatibilitäts-Fixes für ältere ecoDMS-Versionen (insbesondere Exit-Code-Verhalten vor 26)
+- Neue Notify-Adapter (eine kurze Funktion, siehe `_notify_discord`)
+- Pre-Flight-Checks, Integritäts-Verifikation
+- Dokumentation, Beispiele, Install-Scripte für andere Distros
+
+**Eher nicht:**
+- Rewrites in Go/Python/Rust — der Wert liegt darin, ein 1-File-Drop-In zu sein
+- Web-UI, Dashboard, REST-API
+- Alles, was das Aufruf-Interface von `ecoDMSBackupConsole` ändert
+
+Vor dem PR bitte `bash -n ecobackup` laufen lassen. Es gibt (noch) keine Test-Suite; manuelle Smoke-Tests über `ecobackup -t` und `ecobackup -i print user/root` sollten durchgehen.
+
+---
+
+## 🎉 Credits
+
+<div align="center">
+
+[![Anthropic](https://img.shields.io/badge/Anthropic-Claude%20Opus%204.7-D97757?logo=anthropic&logoColor=white&style=for-the-badge)](https://www.anthropic.com/claude)
+[![Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-D97757?logo=anthropic&logoColor=white&style=for-the-badge)](https://claude.com/claude-code)
+
+</div>
+
+Der v1.2-Rewrite — Bug-Forensik, Refactoring, Notify-Adapter, eingebettete Crontabs, README, Release — entstand in einer Pair-Programming-Session mit **[Claude Code](https://claude.com/claude-code)** (Modell: Claude Opus 4.7, 1M Context) als KI-Pair-Programmer.
+
+| Mensch ([@sgtsilver](https://github.com/sgtsilver)) | KI ([Claude Code](https://claude.com/claude-code)) |
+|---|---|
+| Production-Hosts und ecoDMS-Wissen | Bug-Diagnose, Code-Refactoring, Doku |
+| Architektur-Entscheidungen und Code-Review | Implementierung, Tests, Cron-Hygiene |
+| Discord-Webhook und Lizenzwahl | Recherche der offiziellen ecoDMS-Doku, READMEs |
+| "Mach das anders" / "Schmeiß weg" / "Verifizier das" | Vorschläge, Live-Verifikation, Pushback wenn nötig |
+
+Die ursprüngliche v1.0 (Anfang 2023) ist 100% von Menschenhand entstanden — siehe `Initialer Upload des Skriptes` in der Git-History.
+
+> *"Built with Claude Code" heißt: Claude hat den Code geschrieben, der Mensch hat entschieden, was geschrieben wird. Verantwortung für Korrektheit und Sicherheit liegt beim Maintainer.*
+
+---
+
+## 📄 Lizenz
+
+[GNU GPL v3](LICENSE). Volltext in LICENSE. Forks und Derivate müssen unter GPLv3 bleiben.
+
+ecoDMS und ecoDMSBackupConsole sind Marken/Produkte der [ecoDMS GmbH](https://www.ecodms.de/), Aachen. Dieses Projekt ist ein unabhängiger Open-Source-Wrapper und steht in keiner Verbindung mit der ecoDMS GmbH (kein Endorsement, kein Support).
 
 ---
 
 <div align="center">
 
-Made with 🛠 by [@sgtsilver](https://github.com/sgtsilver) and contributors.
-*If this script saved your backup, give it a ⭐.*
+Gebaut mit 🛠 von [@sgtsilver](https://github.com/sgtsilver) — v1.2 in Pair-Programming-Session mit 🤖 [Claude Code](https://claude.com/claude-code).
+*Wenn dieses Skript dein Backup gerettet hat, hinterlass einen ⭐.*
 
 </div>
