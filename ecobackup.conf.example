@@ -18,9 +18,9 @@ MONTHLY_KEEP_DAYS=90
 REMOTE_DIR=/mnt/remote/ecodms
 REMOTE_KEEP_DAYS=14
 
-# Optional: Telekom-/Zweit-Cloud-Slot (für `-a`-Cron).
-# TELEKOM_DIR="/mnt/cloud/EcoDMS Backup/monthly"
-# TELEKOM_KEEP_DAYS=90
+# Optional: zweites Off-Site-/Cloud-Ziel (für den `-a`-Cron-Slot).
+# EXTRA_DIR="/mnt/cloud/EcoDMS Backup/monthly"
+# EXTRA_KEEP_DAYS=90
 
 # === Cron-Installer (-i) ===
 # User dessen Crontab installiert wird. Default: $SUDO_USER bzw. $USER.

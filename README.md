@@ -114,8 +114,8 @@ REMOTE_DIR=/mnt/remote/ecodms
 REMOTE_KEEP_DAYS=14
 
 # Optional: zweites Cloud-Ziel über den `-a`-Cron-Slot
-TELEKOM_DIR="/mnt/cloud/EcoDMS Backup/monthly"
-TELEKOM_KEEP_DAYS=90
+EXTRA_DIR="/mnt/cloud/EcoDMS Backup/monthly"
+EXTRA_KEEP_DAYS=90
 
 # Cron-Installer
 CRON_USER=deinuser

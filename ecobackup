@@ -33,11 +33,11 @@ CRON_SNAPSHOT_DIR="${CRON_SNAPSHOT_DIR:-}"
 # Komma-getrennte Liste von Zielverzeichnissen. Leer = kein Mirror.
 SCRIPT_MIRROR_DIRS="${SCRIPT_MIRROR_DIRS:-}"
 
-# Optional: Telekom-Mount-Path für `-a`-Cron-Slot. Leer = kein Telekom-Slot.
-TELEKOM_DIR="${TELEKOM_DIR:-}"
-TELEKOM_KEEP_DAYS="${TELEKOM_KEEP_DAYS:-90}"
+# Optional: zweites Off-Site-/Cloud-Ziel für den `-a`-Cron-Slot. Leer = aus.
+EXTRA_DIR="${EXTRA_DIR:-}"
+EXTRA_KEEP_DAYS="${EXTRA_KEEP_DAYS:-90}"
 
-# Site-Overrides (DAILY_DIR, MONTHLY_DIR, REMOTE_DIR, TELEKOM_DIR,
+# Site-Overrides (DAILY_DIR, MONTHLY_DIR, REMOTE_DIR, EXTRA_DIR,
 # CRON_SNAPSHOT_DIR, SCRIPT_MIRROR_DIRS, …)
 [ -r /etc/ecobackup/ecobackup.conf ] && . /etc/ecobackup/ecobackup.conf
 
@@ -335,10 +335,10 @@ _cron_user()
 55 1 * * *   /usr/bin/ecobackup -r
 45 1 1 * *   /usr/bin/ecobackup -m
 EOF
-   # Telekom-Slot nur wenn konfiguriert
-   if [ -n "$TELEKOM_DIR" ]; then
+   # Extra-Off-Site-Slot nur wenn konfiguriert
+   if [ -n "$EXTRA_DIR" ]; then
       printf '35 2 1 * *   ECOBACKUP_KEEP_DAYS=%s /usr/bin/ecobackup -a %q\n' \
-         "$TELEKOM_KEEP_DAYS" "$TELEKOM_DIR"
+         "$EXTRA_KEEP_DAYS" "$EXTRA_DIR"
    fi
    # Crontab-Snapshot nur wenn konfiguriert
    if [ -n "$CRON_SNAPSHOT_DIR" ]; then
