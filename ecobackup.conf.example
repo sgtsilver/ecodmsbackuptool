@@ -1,34 +1,74 @@
 # /etc/ecobackup/ecobackup.conf — Site-spezifische Konfiguration
-# Wird vom ecobackup-Script gesourct. Mode 644, Owner root, ok.
+# Wird vom ecobackup-Script als Shell gesourct: Owner root, Mode 644 — nur root
+# darf schreiben. Der Cron-User muss die Datei lesen können (nicht lesbar =
+# wird stillschweigend ignoriert).
 #
 # Alle Werte sind optional — wenn nicht gesetzt, gelten die Defaults aus dem
-# Script (siehe Top-of-Script CONFIG-Block).
+# Script (siehe Top-of-Script CONFIG-Block). Deshalb ist hier alles
+# auskommentiert: nur entkommentieren und anpassen, was du ändern willst.
+#
+# Werte, die in die generierten Crontabs einfließen (EXTRA_*, CRON_USER,
+# CRON_SNAPSHOT_DIR, SCRIPT_MIRROR_DIRS, ECODMS_SERVER_DIR, BACKUP_TOOL),
+# wirken erst nach erneutem `ecobackup -i`. ACHTUNG: `-i` ersetzt die komplette
+# Crontab — vorher `crontab -l` sichern und `ecobackup -i print user|root`
+# ansehen (siehe README, Abschnitt "Cron-Layout").
+# Alle anderen Werte liest das Script bei jedem Lauf neu.
 
 # === ecoDMS Server-Verzeichnis ===
+# Wenn du ECODMS_SERVER_DIR änderst, setze BACKUP_TOOL mit: der Default von
+# BACKUP_TOOL wird berechnet, BEVOR diese Datei eingelesen wird.
 # ECODMS_SERVER_DIR=/opt/ecodms/ecodmsserver
 # BACKUP_TOOL="$ECODMS_SERVER_DIR/tools/ecoDMSBackupConsole"
 
-# === Backup-Ziele ===
-DAILY_DIR=/mnt/backup/ecodms/daily
-DAILY_KEEP_DAYS=7
+# === Log und Lock ===
+# Der Cron-User muss das Logfile schreiben können, sonst fehlt das Log
+# stillschweigend. Anlegen z.B.:
+#   sudo install -m 664 -o root -g ecodms /dev/null /var/log/ecobackup.log
+# LOGFILE=/var/log/ecobackup.log
+# LOCKFILE=/tmp/ecobackup.lock
 
-MONTHLY_DIR=/mnt/backup/ecodms/monthly
-MONTHLY_KEEP_DAYS=90
+# === Backup-Ziele und Retention ===
+# Die Verzeichnisse müssen existieren und für den Cron-User beschreibbar sein
+# (das Script legt sie nicht an). Retention = Alter in Tagen; nach einem
+# erfolgreichen Backup werden DMSbackup*.zip (nur oberste Ebene) gelöscht, die
+# älter sind. Ziele nicht zwischen Slots teilen.
+# Defaults: /var/backups/ecodms/{daily,monthly,remote} mit 7 / 90 / 14 Tagen.
+# DAILY_DIR=/mnt/backup/ecodms/daily
+# DAILY_KEEP_DAYS=7
 
-REMOTE_DIR=/mnt/remote/ecodms
-REMOTE_KEEP_DAYS=14
+# MONTHLY_DIR=/mnt/backup/ecodms/monthly
+# MONTHLY_KEEP_DAYS=90
 
-# Optional: zweites Off-Site-/Cloud-Ziel (für den `-a`-Cron-Slot).
+# REMOTE_DIR=/mnt/remote/ecodms
+# REMOTE_KEEP_DAYS=14
+
+# Optional: zweites Off-Site-/Cloud-Ziel (für den `-a`-Cron-Slot, 1. des Monats
+# 02:35). Leer = Slot aus. Mit Leerzeichen im Pfad: in Anführungszeichen setzen
+# (die Cron-Zeile maskiert sie automatisch).
+# Bis v1.2 hießen die Schlüssel TELEKOM_DIR / TELEKOM_KEEP_DAYS — sie werden in
+# v1.3 noch gelesen (mit Warnung bei `ecobackup -i`), bitte umbenennen:
+#   sudo sed -i 's/^TELEKOM_/EXTRA_/' /etc/ecobackup/ecobackup.conf
 # EXTRA_DIR="/mnt/cloud/EcoDMS Backup/monthly"
 # EXTRA_KEEP_DAYS=90
 
 # === Cron-Installer (-i) ===
-# User dessen Crontab installiert wird. Default: $SUDO_USER bzw. $USER.
-# CRON_USER=paul
+# User dessen Crontab installiert wird. Default: $SUDO_USER, sonst der aktuelle
+# User. Bei Login als echter root (ohne sudo) wäre das root — dann hier den
+# Backup-User eintragen.
+# CRON_USER=<user>
 
-# Optional: Crontab-Snapshots nach Off-Site Pfad sichern (1×/Tag).
+# Optional: Crontab-Snapshots nach Off-Site Pfad sichern (1×/Tag). Verzeichnis
+# muss existieren und beschreibbar sein; keine Leerzeichen im Pfad.
 # CRON_SNAPSHOT_DIR=/mnt/remote/ecodms/crons
 
-# Optional: Script alle 24h nach diesen Verzeichnissen mirroren (Disaster
-# Recovery). Komma-getrennte Liste.
-# SCRIPT_MIRROR_DIRS=/mnt/remote/ecodms/ecobackuptool,/home/USER/git/ecodmsbackuptool
+# Optional: Script täglich (03:00, root-Cron) in diese VERZEICHNISSE kopieren
+# (Disaster Recovery). Komma-getrennte Liste von Verzeichnissen — keine
+# Dateipfade, keine Leerzeichen oder Kommas in den Pfaden. Das Script selbst
+# muss unter /usr/bin/ecobackup liegen (Pfad ist in den Cron-Zeilen fest).
+# SCRIPT_MIRROR_DIRS=/mnt/remote/ecodms/ecobackuptool,/home/<user>/ecobackup-mirror
+
+# === Retention-Override (kein Conf-Wert!) ===
+# ECOBACKUP_KEEP_DAYS ist eine Umgebungsvariable für EINEN Aufruf, z.B.
+#   ECOBACKUP_KEEP_DAYS=30 ecobackup -a /mnt/foo
+# Sie überschreibt die Retention von -d, -m, -r und -a (Default für -a: 90).
+# Nicht hier setzen — sonst gilt sie für alle Slots.
