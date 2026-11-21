@@ -1,4 +1,5 @@
-# /etc/ecobackup/notify.conf — Notification credentials. MODE 600!
+# /etc/ecobackup/notify.conf — Notification credentials. root:ecodms, mode 640
+# (sudo chown root:ecodms … && sudo chmod 640 …): the cron user must be able to read it.
 # Wird vom ecobackup-Script gesourct. NICHT in Git committen.
 
 # Discord-Webhook für Backup-Status-Meldungen.
