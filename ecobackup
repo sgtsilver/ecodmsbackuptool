@@ -6,7 +6,7 @@
 # fest verdrahtet — alles Override-bar via /etc/ecobackup/ecobackup.conf und
 # /etc/ecobackup/notify.conf.
 
-VERSION="1.3"
+VERSION="1.4"
 
 ############################################################
 # CONFIG — Override via /etc/ecobackup/ecobackup.conf      #
@@ -85,9 +85,36 @@ log()
 ############################################################
 notify()
 {
+   ( _notify_heartbeat "$1" ) </dev/null >/dev/null 2>&1 &
    [ "${NOTIFY_ENABLED:-1}" = "1" ] || return 0
    ( _notify_discord "$@" ) </dev/null >/dev/null 2>&1 &
    return 0
+}
+
+############################################################
+# Heartbeat an einen Job-Wächter (optional, seit v1.4)     #
+#                                                          #
+# Meldet nur "dieser Backup-Modus ist gelaufen"; dass ein  #
+# Lauf ausbleibt, erkennt der Wächter (z. B. n8n). Aktiv,  #
+# wenn NOTIFY_HEARTBEAT_URL + _TOKEN in notify.conf stehen #
+# und der Modus HB_JOB gesetzt hat. Token geht per curl -K #
+# über stdin, nicht über die Kommandozeile (ps).           #
+############################################################
+_notify_heartbeat()
+{
+   [ -n "${NOTIFY_HEARTBEAT_URL:-}" ] && [ -n "${NOTIFY_HEARTBEAT_TOKEN:-}" ] && [ -n "${HB_JOB:-}" ] || return 0
+   command -v curl >/dev/null 2>&1 || return 0
+   local status
+   case "$1" in
+      ok)   status=ok   ;;
+      warn) status=warn ;;
+      err)  status=fail ;;
+      *)    return 0    ;;  # info/Test zählt nicht als Lauf
+   esac
+   printf 'header = "X-Webhook-Token: %s"\n' "$NOTIFY_HEARTBEAT_TOKEN" \
+      | curl -sS -m 15 -K - -H "Content-Type: application/json" -X POST \
+             -d "{\"job\":\"${HB_JOB}\",\"status\":\"${status}\",\"host\":\"$(hostname)\"}" \
+             "$NOTIFY_HEARTBEAT_URL" >/dev/null 2>&1 || true
 }
 
 _notify_discord()
@@ -128,7 +155,9 @@ ecobackup ${VERSION} — Wrapper um \${BACKUP_TOOL} (ecoDMSBackupConsole).
 
 Voraussetzung: Owner ecodms:ecodms + mode 710 auf BackupConsole, eingeloggter
 User in Gruppe ecodms (siehe \`ecobackup -s\`). Wird vom täglichen root-Cron
-aufrechterhalten (siehe \`ecobackup -i print root\`).
+aufrechterhalten (siehe \`ecobackup -i print root\`). Vor jedem Backup prüft
+ecobackup die Rechte und stellt sie selbst wieder her, wenn sudo ohne Passwort
+möglich ist (ecoDMS-Updates setzen sie zurück).
 
 Syntax: ecobackup [-h|-V|-d|-m|-r|-c|-a <pfad>|-s|-i|-t]
 
@@ -222,6 +251,52 @@ prune()
    return 0
 }
 
+############################################################
+# BackupConsole-Rechte vor dem Lauf prüfen (seit v1.4)     #
+#                                                          #
+# ecoDMS' dpkg-postinst setzt die BackupConsole bei jedem  #
+# Paket-Update auf mode 700 zurück. Der root-Cron stellt   #
+# die Rechte nur 1×/Tag wieder her; nach einem Update am   #
+# Abend scheiterten die Backups der folgenden Nacht mit    #
+# "exit 126". Deshalb hier direkt vor dem Lauf prüfen und, #
+# wenn sudo ohne Passwort möglich ist, selbst reparieren   #
+# (chown + chmod wie `ecobackup -s`, ohne usermod).        #
+#                                                          #
+# return 0 = ausführbar; TOOL_REPAIR_NOTE ist gesetzt,     #
+#            wenn repariert wurde.                         #
+# return 1 = nicht ausführbar; Ursache im Log und in       #
+#            TOOL_REPAIR_ERROR.                            #
+############################################################
+TOOL_REPAIR_NOTE=""
+TOOL_REPAIR_ERROR=""
+ensure_tool_executable()
+{
+   TOOL_REPAIR_NOTE=""
+   TOOL_REPAIR_ERROR=""
+   [ -x "$BACKUP_TOOL" ] && return 0
+   if [ ! -e "$BACKUP_TOOL" ]; then
+      TOOL_REPAIR_ERROR="BackupConsole nicht gefunden: $BACKUP_TOOL"
+      log "Fehler: $TOOL_REPAIR_ERROR"
+      return 1
+   fi
+   log "BackupConsole für $(id -un) nicht ausführbar — setze ecodms:ecodms, mode 710 (sudo -n)"
+   local out
+   out=$( { sudo -n /bin/chown ecodms:ecodms "$BACKUP_TOOL" \
+            && sudo -n /bin/chmod 710 "$BACKUP_TOOL"; } 2>&1 )
+   # Nicht dem sudo-Exit-Code glauben, sondern dem Ergebnis: ist der User
+   # nicht in der Gruppe ecodms, bleibt das Tool trotz chmod unausführbar.
+   if [ -x "$BACKUP_TOOL" ]; then
+      TOOL_REPAIR_NOTE="Rechte der BackupConsole repariert (ecodms:ecodms, 710)"
+      log "$TOOL_REPAIR_NOTE — vermutlich nach einem ecoDMS-Paket-Update"
+      return 0
+   fi
+   TOOL_REPAIR_ERROR="BackupConsole nicht ausführbar und nicht reparierbar: $BACKUP_TOOL"
+   log "Fehler: $TOOL_REPAIR_ERROR"
+   [ -n "$out" ] && log "  sudo: ${out//$'\n'/; }"
+   log "  Abhilfe: als root chown ecodms:ecodms + chmod 710 auf die BackupConsole setzen; ist $(id -un) nicht in der Gruppe ecodms: ecobackup -s, dann neu einloggen"
+   return 1
+}
+
 # Backup ausführen und bei Erfolg prunen + notifyen.
 # args: <ziel-dir> <keep_days> <label>
 run_backup()
@@ -230,6 +305,13 @@ run_backup()
    acquire_lock
    check_space "$dest"
    log "${label} gestartet nach $dest"
+   if ! ensure_tool_executable; then
+      log "Backup FEHLGESCHLAGEN! (BackupConsole nicht ausführbar)"
+      notify err "${label} FAIL" "Ziel: \`$dest\`
+${TOOL_REPAIR_ERROR}
+Log: \`${LOGFILE}\`"
+      exit 1
+   fi
    local start end elapsed rc
    start=$(date +%s)
    "$BACKUP_TOOL" "$dest/"
@@ -248,10 +330,12 @@ run_backup()
          size_h="?"
       fi
       prune "$dest" "$keep"
+      local repair_line=""
+      [ -n "$TOOL_REPAIR_NOTE" ] && repair_line=$'\n'"$TOOL_REPAIR_NOTE"
       notify ok "${label} ok" "Ziel: \`$dest\`
 Dauer: ${elapsed}s
 Größe: ${size_h}
-${LAST_PRUNE_SUMMARY}"
+${LAST_PRUNE_SUMMARY}${repair_line}"
       return 0
    else
       log "Backup FEHLGESCHLAGEN! (BackupConsole exit ${rc}, ${elapsed}s)"
@@ -270,7 +354,8 @@ Log: \`${LOGFILE}\`"
 # Update auf root:root mode 700. Dann kann nur root via    #
 # sudo (mit Passwort, cron-untauglich) das Tool starten.   #
 # Workaround: Owner ecodms:ecodms + mode 710 + User in     #
-# ecodms-Gruppe. Der tägliche root-Cron hält das aufrecht. #
+# ecodms-Gruppe. Der tägliche root-Cron hält das aufrecht, #
+# und ensure_tool_executable prüft es vor jedem Backup.    #
 ############################################################
 setup()
 {
@@ -283,9 +368,9 @@ setup()
 ############################################################
 # Backup-Funktionen                                        #
 ############################################################
-Daily()   { run_backup "$DAILY_DIR"   "${ECOBACKUP_KEEP_DAYS:-$DAILY_KEEP_DAYS}"   "Tägliches Backup"; }
-Monthly() { run_backup "$MONTHLY_DIR" "${ECOBACKUP_KEEP_DAYS:-$MONTHLY_KEEP_DAYS}" "Monatliches Backup"; }
-Remote()  { run_backup "$REMOTE_DIR"  "${ECOBACKUP_KEEP_DAYS:-$REMOTE_KEEP_DAYS}"  "Remote Backup"; }
+Daily()   { HB_JOB=ecobackup-daily;   run_backup "$DAILY_DIR"   "${ECOBACKUP_KEEP_DAYS:-$DAILY_KEEP_DAYS}"   "Tägliches Backup"; }
+Monthly() { HB_JOB=ecobackup-monthly; run_backup "$MONTHLY_DIR" "${ECOBACKUP_KEEP_DAYS:-$MONTHLY_KEEP_DAYS}" "Monatliches Backup"; }
+Remote()  { HB_JOB=ecobackup-remote;  run_backup "$REMOTE_DIR"  "${ECOBACKUP_KEEP_DAYS:-$REMOTE_KEEP_DAYS}"  "Remote Backup"; }
 
 Custom()
 {
@@ -299,6 +384,10 @@ Custom()
    acquire_lock
    check_space "$pfad"
    log "Manuelles Backup gestartet nach $pfad"
+   if ! ensure_tool_executable; then
+      log "Backup FEHLGESCHLAGEN! (BackupConsole nicht ausführbar)"
+      exit 1
+   fi
    "$BACKUP_TOOL" "$pfad/"
    local rc=$?
    if [ $rc -eq 0 ]; then
@@ -315,6 +404,7 @@ AUI()
       log "Fehler: Verzeichnis $direct existiert nicht!"
       exit 1
    fi
+   HB_JOB=ecobackup-archive
    run_backup "$direct" "${ECOBACKUP_KEEP_DAYS:-90}" "Backup ($direct)"
 }
 
