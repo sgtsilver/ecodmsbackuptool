@@ -6,7 +6,7 @@
 *Script-interne Retention · eingebettete Crontabs · Discord-Benachrichtigungen · wenig Abhängigkeiten*
 
 [![License: GPL v3](https://img.shields.io/badge/Lizenz-GPLv3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.3-blue.svg)](#-upgrade-von-v12)
+[![Version](https://img.shields.io/badge/Version-1.4-blue.svg)](#-upgrade-von-v12)
 [![Shell](https://img.shields.io/badge/shell-bash-1f425f.svg)](https://www.gnu.org/software/bash/)
 [![ecoDMS](https://img.shields.io/badge/ecoDMS-26.01%20verifiziert-blue.svg)](https://www.ecodms.de/)
 [![PRs willkommen](https://img.shields.io/badge/PRs-willkommen-brightgreen.svg)](#-mitmachen)
@@ -15,7 +15,7 @@
 </div>
 
 > **English summary:** `ecobackup` is a single-file Bash wrapper around ecoDMS' `ecoDMSBackupConsole` (documentation is in German).
-> It adds age-based retention, a simple lockfile, embedded crontabs (`ecobackup -i`) and optional Discord notifications.
+> It adds age-based retention, a simple lockfile, embedded crontabs (`ecobackup -i`), a permission self-repair for the BackupConsole before each run, and optional Discord notifications and watchdog heartbeats.
 > Needs Bash and GNU coreutils on the ecoDMS host; `curl` and `python3` are optional (Discord only).
 > Built for dpkg-based (Debian) ecoDMS installs; verified with ecoDMS 26.01 only.
 > **Warning:** `ecobackup -i` replaces the *entire* crontab — back it up (`crontab -l`) and preview with `ecobackup -i print user|root` first.
@@ -24,7 +24,7 @@
 
 `ecoDMSBackupConsole` wird mit ecoDMS ausgeliefert und macht genau **eine** Sache: ein Zip in ein Verzeichnis schreiben. Keine Rotation. Keine Verifikation. Keine Benachrichtigungen. Kein dokumentierter Exit-Code-Vertrag.
 
-Dieser Wrapper schließt die Lücke — ein einzelnes `bash`-Skript (knapp 500 Zeilen, keine Abhängigkeiten außer GNU-Standardwerkzeugen; `curl` und `python3` nur optional fürs Discord-Senden und JSON-Encoding), das in wenigen Minuten eingerichtet ist.
+Dieser Wrapper schließt die Lücke — ein einzelnes `bash`-Skript (knapp 600 Zeilen, keine Abhängigkeiten außer GNU-Standardwerkzeugen; `curl` und `python3` nur optional fürs Discord-Senden und JSON-Encoding), das in wenigen Minuten eingerichtet ist.
 
 ```
    ┌─────────┐    ┌──────────────────────┐    ┌───────────────┐
@@ -71,7 +71,8 @@ Dieser Wrapper schließt die Lücke — ein einzelnes `bash`-Skript (knapp 500 Z
 | 📣 **Discord-Benachrichtigungen** (weitere Kanäle vorbereitet) | Discord-Webhook ist fest verdrahtet; die generische `notify`-Schnittstelle ist auf weitere Kanäle (ntfy/Slack/…) erweiterbar — siehe [Roadmap](#-roadmap) |
 | ⚙️ **Eingebettete Crontabs** | `ecobackup -i` installiert die Cron-Einträge diff-basiert — **ersetzt dabei aber die komplette Crontab** (siehe [Warnung](#-cron-layout)); keine separaten Cron-Files zu pflegen |
 | 🧪 **Smoke-Test-freundlich** | `ecobackup -t` testet das Notify, `ecobackup -i print user` ist ein Dry-Run |
-| 🛠 **Permissions-Self-Heal** | ein root-Cron stellt täglich um 03:10 `Owner/Mode` der `BackupConsole` wieder her, die der ecoDMS-`dpkg postinst` nach jedem Update auf `root:root 700` zurücksetzt — **nach** den Backups, siehe [Hinweis](#der-permissions-tanz-mit-ecodmsbackupconsole) |
+| 🛠 **Permissions-Self-Heal** | der ecoDMS-`dpkg postinst` setzt die `BackupConsole` nach jedem Update auf mode 700 zurück. ecobackup prüft das **vor jedem Backup** und stellt `Owner/Mode` selbst wieder her (braucht `sudo` ohne Passwort); zusätzlich tut das ein root-Cron täglich um 03:10 — siehe [Hinweis](#der-permissions-tanz-mit-ecodmsbackupconsole) |
+| 💓 **Heartbeat (optional)** | nach jedem Lauf ein HTTP-POST an einen eigenen Job-Wächter (z. B. ein n8n-Webhook), damit auch ein *ausbleibender* Lauf auffällt — siehe [Heartbeat](#heartbeat-an-einen-job-wächter-optional) |
 | 📦 **Wenig Abhängigkeiten** | `bash` + GNU-Standardwerkzeuge; optional `curl` + `python3` für Discord, siehe [Voraussetzungen](#-voraussetzungen) |
 | 🌐 **Konfigurierbare Pfade** | Pfade und Retention in `/etc/ecobackup/ecobackup.conf`; Uhrzeiten und die cups-Jobs der Root-Crontab sind im Skript fest verdrahtet |
 
@@ -81,9 +82,9 @@ Dieser Wrapper schließt die Lücke — ein einzelnes `bash`-Skript (knapp 500 Z
 
 - **ecoDMS-Server auf demselben Host** mit vorhandener `ecoDMSBackupConsole` (Default `/opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole`, anpassbar über `ECODMS_SERVER_DIR` / `BACKUP_TOOL`). Verifiziert ist das Verhalten nur mit **ecoDMS 26.01** (siehe [Exit-Code-Vertrag](#exit-code-vertrag)); bei anderen Versionen bitte vorher testen.
 - **Linux mit dpkg-basierter ecoDMS-Installation.** Der Permissions-Workaround bezieht sich auf das ecoDMS-`dpkg postinst`; Pfade und Beispiele sind auf Debian ausgelegt. Einzelne Debian-Versionen sind nicht verifiziert.
-- **`bash`**, **`cron`** (das Kommando `crontab`) und **`sudo`** — `sudo` braucht `ecobackup -s` (`chown`, `chmod`, `usermod`) sowie die Installation der Root-Crontab (`sudo ecobackup -i`). User und Gruppe `ecodms` müssen existieren.
+- **`bash`**, **`cron`** (das Kommando `crontab`) und **`sudo`** — `sudo` braucht `ecobackup -s` (`chown`, `chmod`, `usermod`) sowie die Installation der Root-Crontab (`sudo ecobackup -i`). User und Gruppe `ecodms` müssen existieren. Für die automatische Rechte-Reparatur vor einem Backup (seit v1.4) braucht der Cron-User `sudo` **ohne Passwort** für `/bin/chown ecodms:ecodms <BackupConsole>` und `/bin/chmod 710 <BackupConsole>`; ohne das bleibt es beim root-Cron (siehe [Hinweis](#der-permissions-tanz-mit-ecodmsbackupconsole)).
 - **GNU coreutils/findutils**: `numfmt`, `stat -c`, `find -newermt` (daneben `du`, `df`, `diff`, `realpath`). Fehlen `numfmt`, `stat -c` oder `find -newermt` (z. B. BSD/macOS), läuft das Backup trotzdem — nur die Größenangaben in Log und Meldung werden ungenau.
-- **Optional `curl` + `python3`** für die Discord-Meldungen (`python3` baut das JSON). Fehlt eines davon, wird die Meldung **still übersprungen** — kein Fehler, keine Warnung. Nachinstallieren z. B. mit `sudo apt install curl python3`.
+- **Optional `curl` + `python3`** für die Discord-Meldungen (`python3` baut das JSON). Fehlt eines davon, wird die Meldung **still übersprungen** — kein Fehler, keine Warnung. Nachinstallieren z. B. mit `sudo apt install curl python3`. Der optionale Heartbeat braucht nur `curl`.
 - Ein **normaler User** ("Cron-User"), unter dem die Backups per Cron laufen. Er muss in der Gruppe `ecodms` sein (macht `ecobackup -s`) und in die Zielverzeichnisse schreiben dürfen — das Skript legt sie nicht an.
 - **Das Skript muss unter `/usr/bin/ecobackup` liegen.** Dieser Pfad ist in den generierten Cron-Zeilen und im Script-Mirror fest verdrahtet.
 
@@ -146,10 +147,12 @@ Das Skript rotiert sein Log nicht selbst. Wer das möchte, legt eine logrotate-R
 
 ## 🔄 Upgrade von v1.2
 
-**Was sich ändert:** Die Config-Schlüssel für das optionale zweite Off-Site-Ziel (`-a`-Cron-Slot) heißen jetzt `EXTRA_DIR` und `EXTRA_KEEP_DAYS` (vorher `TELEKOM_DIR` und `TELEKOM_KEEP_DAYS`). Neu ist außerdem `ecobackup -V`.
+**Von v1.3 auf v1.4:** Nur das Skript ersetzen (`sudo install -m 755 -o root -g root ecobackup /usr/bin/ecobackup`); Config und Crontabs bleiben unverändert. Neu sind die [Rechte-Reparatur vor jedem Lauf](#der-permissions-tanz-mit-ecodmsbackupconsole) und der optionale [Heartbeat](#heartbeat-an-einen-job-wächter-optional).
+
+**Von v1.2 — was sich ändert:** Die Config-Schlüssel für das optionale zweite Off-Site-Ziel (`-a`-Cron-Slot) heißen jetzt `EXTRA_DIR` und `EXTRA_KEEP_DAYS` (vorher `TELEKOM_DIR` und `TELEKOM_KEEP_DAYS`). Neu ist außerdem `ecobackup -V`.
 
 - Die Schlüssel werden nur beim **Erzeugen der Crontab** ausgewertet (`ecobackup -i`, `-i print`); der Pfad des `-a`-Slots steht fest in der installierten Cron-Zeile. Eine bereits installierte Crontab läuft deshalb unverändert weiter.
-- Die alten Namen funktionieren in v1.3 weiter: ecobackup fällt auf sie zurück (die neuen Namen haben Vorrang) und warnt, z. B. `WARN: TELEKOM_DIR ist veraltet — bitte in EXTRA_DIR umbenennen (seit v1.3)` — auf stderr, bei `ecobackup -i` zusätzlich im Log. Ohne den Fallback würde ein erneutes `ecobackup -i` den `-a`-Slot aus der Crontab entfernen, weil `EXTRA_DIR` leer wäre.
+- Die alten Namen funktionieren seit v1.3 weiter: ecobackup fällt auf sie zurück (die neuen Namen haben Vorrang) und warnt, z. B. `WARN: TELEKOM_DIR ist veraltet — bitte in EXTRA_DIR umbenennen (seit v1.3)` — auf stderr, bei `ecobackup -i` zusätzlich im Log. Ohne den Fallback würde ein erneutes `ecobackup -i` den `-a`-Slot aus der Crontab entfernen, weil `EXTRA_DIR` leer wäre.
 - Das Umbenennen wird empfohlen:
 
 ```bash
@@ -160,14 +163,14 @@ sudo install -m 755 -o root -g root ecobackup /usr/bin/ecobackup
 grep -n 'TELEKOM_' /etc/ecobackup/ecobackup.conf
 sudo sed -i 's/^TELEKOM_/EXTRA_/' /etc/ecobackup/ecobackup.conf
 
-# 3. Crontab prüfen — die generierten Zeilen sind in v1.3 dieselben wie in v1.2
+# 3. Crontab prüfen — die generierten Zeilen sind seit v1.2 unverändert
 ecobackup -i print user                   # mit `crontab -l` vergleichen; nach dem Umbenennen ohne Warnung
 # Nur wenn du sie neu erzeugen willst (Warnung im Abschnitt "Cron-Layout" beachten!):
 ecobackup -i                              # bzw. `sudo ecobackup -i` inkl. root-Crontab;
                                           # meldet "bereits aktuell", wenn nichts zu tun ist
 
 # 4. Version prüfen
-ecobackup -V                              # → ecobackup 1.3
+ecobackup -V                              # → ecobackup 1.4
 ```
 
 Der `sed`-Aufruf erwischt nur Zeilen, die direkt mit `TELEKOM_` beginnen; auskommentierte Zeilen (`# TELEKOM_DIR=…`) bleiben unverändert.
@@ -226,6 +229,10 @@ Werte, die in die generierten Crontabs einfließen — `EXTRA_*`, `CRON_USER`, `
 ```bash
 NOTIFY_DISCORD_WEBHOOK=https://discord.com/api/webhooks/<id>/<token>
 NOTIFY_ENABLED=1
+
+# Optional (seit v1.4): Heartbeat an einen Job-Wächter, siehe "Benachrichtigungen"
+# NOTIFY_HEARTBEAT_URL=https://<waechter>/<pfad>
+# NOTIFY_HEARTBEAT_TOKEN=<token>
 ```
 
 Die Backups laufen als Cron-User, nicht als root. Mit `root:root 600` wäre die Datei für den Cron-User unlesbar, und das Skript würde sie stillschweigend überspringen — es kämen keine Discord-Meldungen an. Deshalb `root:ecodms` + `640`: Lesen dürfen root und die Mitglieder der Gruppe `ecodms` (also der Cron-User, siehe `ecobackup -s`), schreiben nur root.
@@ -246,7 +253,7 @@ Die Backups laufen als Cron-User, nicht als root. Mit `root:root 600` wäre die 
 | `ecobackup -i print user` | Dry-Run: zeigt die User-Crontab, die installiert würde |
 | `ecobackup -i print root` | Dry-Run: zeigt die root-Crontab, die installiert würde |
 | `ecobackup -t` | Test-Notification senden |
-| `ecobackup -V` / `--version` | Version ausgeben (`ecobackup 1.3`) |
+| `ecobackup -V` / `--version` | Version ausgeben (`ecobackup 1.4`) |
 | `ecobackup -h` | Hilfe mit aktuell aufgelöster Konfiguration und Version |
 
 ### Retention im Detail
@@ -278,8 +285,10 @@ Läufe mit `-d`, `-m`, `-r` und `-a` schicken — sofern ein Webhook konfigurier
 Farbcodierung nach Level:
 - grün (`ok`) — Backup hat geklappt, Retention angewendet
 - gelb (`warn`) — wenig Speicher (< 500 MB frei, das Backup läuft trotzdem), Lock-Kollision
-- rot (`err`) — Backup fehlgeschlagen (mit BackupConsole-Exit-Code und Log-Pfad)
+- rot (`err`) — Backup fehlgeschlagen (mit BackupConsole-Exit-Code und Log-Pfad), oder die BackupConsole war nicht ausführbar und ließ sich nicht reparieren
 - blau (`info`) — nur die Test-Nachricht von `ecobackup -t`
+
+Musste ecobackup vor dem Lauf die Rechte der BackupConsole wiederherstellen (siehe [Permissions-Tanz](#der-permissions-tanz-mit-ecodmsbackupconsole)), steht das als zusätzliche Zeile in der grünen Meldung: `Rechte der BackupConsole repariert (ecodms:ecodms, 710)`.
 
 **Wann wird *nicht* gemeldet?**
 
@@ -294,6 +303,29 @@ Farbcodierung nach Level:
 `ecobackup -t` meldet "Gesendet", sobald die Nachricht abgeschickt wurde — nicht, ob sie angekommen ist. Entscheidend ist der Discord-Channel.
 
 Der Aufruf `notify <ok|warn|err|info> "<Titel>" "<Body>"` ist generisch gehalten, aber **derzeit ist nur Discord implementiert** (`notify()` ruft fest `_notify_discord()` auf). Weitere Kanäle (ntfy/Slack/Telegram) wären eine eigene Funktion plus ein Aufruf in `notify()` — siehe [Roadmap](#-roadmap).
+
+### Heartbeat an einen Job-Wächter (optional)
+
+Discord meldet, was ein Lauf ergeben hat — aber nicht, dass ein Lauf **ausgeblieben** ist (Cron tot, Host aus, Crontab überschrieben). Dafür kann ecobackup seit v1.4 nach jedem Lauf zusätzlich einen HTTP-POST an einen Job-Wächter schicken, der Alarm schlägt, wenn die Meldung ausbleibt (z. B. ein n8n-Webhook). Aktiv, sobald `NOTIFY_HEARTBEAT_URL` und `NOTIFY_HEARTBEAT_TOKEN` in der `notify.conf` stehen; braucht `curl`.
+
+```
+POST <NOTIFY_HEARTBEAT_URL>
+X-Webhook-Token: <NOTIFY_HEARTBEAT_TOKEN>
+Content-Type: application/json
+
+{"job":"ecobackup-daily","status":"ok","host":"<hostname>"}
+```
+
+| Feld | Werte |
+|---|---|
+| `job` | `ecobackup-daily` (`-d`), `ecobackup-remote` (`-r`), `ecobackup-monthly` (`-m`), `ecobackup-archive` (`-a`) |
+| `status` | `ok`, `warn` (wenig Speicher, Lock-Kollision), `fail` |
+
+- Der Heartbeat ist unabhängig von `NOTIFY_ENABLED` und vom Discord-Webhook.
+- `-c`, `-s`, `-i` und `-t` senden keinen Heartbeat.
+- Ein Lauf kann mehrere Heartbeats senden, z. B. erst `warn` (wenig Speicher), dann `ok`.
+- Das Token geht über stdin an `curl` (`-K -`), nicht über die Kommandozeile, und ist damit in `ps` nicht sichtbar. Timeout 15 s; Fehler werden verschluckt, das Backup bleibt unbeeinflusst.
+- Die Wächter-Seite (Empfang, Fälligkeiten, Alarm) ist nicht Teil von ecobackup.
 
 ---
 
@@ -346,10 +378,11 @@ Der ecoDMS-`dpkg postinst` setzt `/opt/ecodms/ecodmsserver/tools/ecoDMSBackupCon
 ecobackups Workaround:
 
 1. Einmal `ecobackup -s` → `chown ecodms:ecodms` + `chmod 710` + `usermod -a -G ecodms $USER`
-2. Der root-Cron (nur vorhanden, wenn die Root-Crontab per `sudo ecobackup -i` installiert wurde) wendet chown/chmod täglich um **03:10** erneut an
-3. Backups laufen als dein User (Mitglied der `ecodms`-Gruppe) — kein sudo-Passwort nötig
+2. **Vor jedem Backup** (seit v1.4) prüft ecobackup, ob die BackupConsole für den Cron-User ausführbar ist. Wenn nicht, setzt es per `sudo -n` selbst `chown ecodms:ecodms` + `chmod 710`, vermerkt das im Log (`Rechte der BackupConsole repariert …`) und in der grünen Meldung und fährt das Backup. Das braucht `sudo` **ohne Passwort** für genau diese beiden Kommandos
+3. Der root-Cron (nur vorhanden, wenn die Root-Crontab per `sudo ecobackup -i` installiert wurde) wendet chown/chmod zusätzlich täglich um **03:10** an — das Netz für Hosts ohne passwortloses `sudo`
+4. Backups laufen als dein User (Mitglied der `ecodms`-Gruppe) — kein sudo-Passwort nötig
 
-**Zeitliche Lücke:** Der 03:10-Job läuft *nach* den Backups (01:35–02:35). Nach einem ecoDMS-Update können deshalb die nächsten Backups einmal fehlschlagen — typischerweise `Permission denied`, Exit 126 im Log und eine rote Meldung —, bevor der root-Cron die Rechte repariert. Wer nicht bis zur nächsten Nacht warten will, führt nach einem ecoDMS-Update direkt `ecobackup -s` aus.
+**Ohne passwortloses `sudo` bleibt eine zeitliche Lücke:** Der 03:10-Job läuft *nach* den Backups (01:35–02:35). Nach einem ecoDMS-Update schlägt dann der nächste Lauf einmal fehl, bevor der root-Cron die Rechte repariert — seit v1.4 mit der Log-Zeile `BackupConsole nicht ausführbar und nicht reparierbar` und einer roten Meldung, bis v1.3 mit `Permission denied` und einem nackten `BackupConsole exit 126`. Abhilfe: nach einem ecoDMS-Update direkt `ecobackup -s` ausführen, oder dem Cron-User die beiden Kommandos aus Schritt 2 per `NOPASSWD`-Regel in `/etc/sudoers.d/` erlauben.
 
 ### Lock-Modell
 
@@ -391,7 +424,7 @@ Das Zurückspielen ist **nicht Teil von ecobackup**. Die erzeugten `DMSbackup*.z
 
 | Symptom | Ursache und Abhilfe |
 |---|---|
-| `Permission denied` / `BackupConsole exit 126` im Log | Rechte der BackupConsole oder Gruppenmitgliedschaft fehlen — typisch direkt nach einem ecoDMS-Update (siehe [Zeitliche Lücke](#der-permissions-tanz-mit-ecodmsbackupconsole)). `ecobackup -s` erneut als Cron-User ausführen und neu einloggen. Prüfen: `ls -l /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole` (erwartet `-rwx--x--- ecodms ecodms`) und `id` (enthält `ecodms`). |
+| `BackupConsole nicht ausführbar und nicht reparierbar` im Log (bis v1.3: `Permission denied` / `BackupConsole exit 126`) | Rechte der BackupConsole oder Gruppenmitgliedschaft fehlen, und `sudo -n` durfte sie nicht wiederherstellen — typisch direkt nach einem ecoDMS-Update auf Hosts ohne passwortloses `sudo` (siehe [zeitliche Lücke](#der-permissions-tanz-mit-ecodmsbackupconsole)). Die Log-Zeile `sudo: …` direkt darunter nennt den Grund. `ecobackup -s` erneut als Cron-User ausführen und neu einloggen. Prüfen: `ls -l /opt/ecodms/ecodmsserver/tools/ecoDMSBackupConsole` (erwartet `-rwx--x--- ecodms ecodms`) und `id` (enthält `ecodms`). |
 | `BackupConsole exit 2` | Zielverzeichnis existiert nicht oder ist für den Cron-User nicht beschreibbar (laut [Exit-Code-Vertrag](#exit-code-vertrag)). |
 | `Backup läuft bereits (lockfile: …)` / "Lockfile vorhanden" | Läuft ein anderer Slot noch (`pgrep -af ecobackup`)? Falls nicht, ist das Lockfile ein Überbleibsel: `rm /tmp/ecobackup.lock` (ggf. mit `sudo`). Siehe [Lock-Modell](#lock-modell). |
 | Keine Discord-Meldung | 1. `ls -l /etc/ecobackup/notify.conf` — muss für den Cron-User lesbar sein (`root:ecodms 640`, Cron-User in Gruppe `ecodms`). 2. `NOTIFY_ENABLED` nicht `0`, Webhook-URL gesetzt. 3. `curl` und `python3` installiert (`command -v curl python3`). 4. `ecobackup -t` als Cron-User (nicht per `sudo`) ausführen; "Kein NOTIFY_DISCORD_WEBHOOK konfiguriert" heißt: Datei nicht lesbar oder Variable leer. 5. Bleibt der Channel leer, die Webhook-URL in Discord prüfen — Zustellfehler werden nicht gemeldet. |
@@ -456,6 +489,7 @@ Backup gelang → `log` fiel um → `||`-Zweig zündete → Script exit 1 → so
 | **v1.1** (interner Zwischenstand, nicht getaggt) | Retention in das Script gezogen; `&&`-Chains aus dem Cron raus. Bug-Klasse strukturell weg. |
 | **v1.2** | Pfade konfig-driven, eingebettete Crontabs, Discord-Notify, generisches User-Refactoring fürs Public Release. |
 | **v1.3** | Kompatibilitäts-Shim: `TELEKOM_DIR`/`TELEKOM_KEEP_DAYS` → `EXTRA_DIR`/`EXTRA_KEEP_DAYS` (alte Namen funktionieren weiter, mit Deprecation-Warnung); neu `ecobackup -V`/`--version`; Doku-Korrekturen (Lock-Modell, Crontab-Warnung, Voraussetzungen, Rechte für `notify.conf` und Logfile, Retention, Exit-Codes, Fehlersuche, Deinstallation). |
+| **v1.4** | Rechte-Reparatur vor jedem Lauf: ist die BackupConsole nach einem ecoDMS-Update nicht ausführbar, stellt ecobackup `ecodms:ecodms 710` per `sudo -n` selbst wieder her, statt mit `exit 126` zu scheitern (vorher fiel nach einem Update am Abend die folgende Nacht aus); klare Fehlermeldung, wenn das nicht geht. Neu: optionaler Heartbeat an einen Job-Wächter (`NOTIFY_HEARTBEAT_URL` / `NOTIFY_HEARTBEAT_TOKEN`). Erster Test: `tests/selfrepair.sh`. |
 
 Die Logfile-Falle gilt auch heute noch: Deshalb legt der [Quick Start](#-quick-start) das Logfile mit passenden Rechten an, bevor irgendetwas als root läuft.
 
@@ -496,7 +530,7 @@ Dieses Tool fing als Single-Host-Skript an und ist gewachsen. Die Architektur is
 - Web-UI, Dashboard, REST-API
 - Alles, was das Aufruf-Interface von `ecoDMSBackupConsole` ändert
 
-Vor dem PR bitte `bash -n ecobackup` laufen lassen. Es gibt (noch) keine Test-Suite; manuelle Smoke-Tests über `ecobackup -t` und `ecobackup -i print user/root` sollten durchgehen.
+Vor dem PR bitte `bash -n ecobackup` laufen lassen. `bash tests/selfrepair.sh` prüft die Rechte-Reparatur in einer Sandbox unter `mktemp` (braucht passwortloses `sudo` und die Mitgliedschaft in der Gruppe `ecodms`; die echte BackupConsole, Backups, Logfile und Crontabs fasst der Test nicht an). Eine vollständige Test-Suite gibt es (noch) nicht; manuelle Smoke-Tests über `ecobackup -t` und `ecobackup -i print user/root` sollten durchgehen.
 
 ---
 

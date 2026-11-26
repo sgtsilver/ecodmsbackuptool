@@ -8,3 +8,11 @@
 
 # Global enable/disable (1 = senden, 0 = stumm).
 # NOTIFY_ENABLED=1
+
+# Optional (seit v1.4): Heartbeat an einen Job-Wächter, der Alarm schlägt, wenn ein
+# Backup-Modus ausbleibt. POST {"job":"ecobackup-daily|-remote|-monthly|-archive",
+# "status":"ok|warn|fail","host":"<hostname>"} mit Header X-Webhook-Token.
+# Unabhängig von NOTIFY_ENABLED; braucht curl.
+# NOTIFY_HEARTBEAT_URL=https://<waechter>/<pfad>
+# NOTIFY_HEARTBEAT_TOKEN=<token>
+
